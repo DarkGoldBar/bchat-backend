@@ -1,0 +1,8 @@
+{
+  "name": "registeruser",
+  "version": "1.0.0",
+  "main": "app.js",
+  "dependencies": {
+    "uuid": "^9.0.0"
+  }
+}

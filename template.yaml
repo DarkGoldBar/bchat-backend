@@ -1,0 +1,191 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: BChat backend powered by AWS SAM
+
+Globals:
+  Function:
+    Timeout: 10
+    Runtime: nodejs20.x
+    MemorySize: 128
+    Architectures:
+      - arm64
+    Environment:
+      Variables:
+        USERS_TABLE: UsersTable
+        ROOMS_TABLE: RoomsTable
+        MESSAGES_TABLE: MessagesTable
+
+Resources:
+  ##############################
+  # WebSocket API
+  ##############################
+
+  BChatWebSocketApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: BChatWebSocketAPI
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: "$request.body.action"
+
+  BChatWebSocketStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref BChatWebSocketApi
+      StageName: prod
+      AutoDeploy: true
+
+  ##############################
+  # WebSocket Routes & Functions
+  ##############################
+
+  WebSocketConnectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/websocketConnect/
+      Handler: app.handler
+      Events:
+        Connect:
+          Type: Api
+          Properties:
+            Path: $connect
+            Method: GET
+            ApiId: !Ref BChatWebSocketApi
+
+  WebSocketDisconnectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/websocketDisconnect/
+      Handler: app.handler
+      Events:
+        Disconnect:
+          Type: Api
+          Properties:
+            Path: $disconnect
+            Method: GET
+            ApiId: !Ref BChatWebSocketApi
+
+  WebSocketMessageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/websocketMessage/
+      Handler: app.handler
+      Events:
+        Default:
+          Type: Api
+          Properties:
+            Path: $default
+            Method: POST
+            ApiId: !Ref BChatWebSocketApi
+
+  ##############################
+  # HTTP REST API Functions
+  ##############################
+
+  RegisterUserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/registerUser/
+      Handler: app.handler
+      Events:
+        Register:
+          Type: Api
+          Properties:
+            Path: /register
+            Method: POST
+
+  LoginUserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/loginUser/
+      Handler: app.handler
+      Events:
+        Login:
+          Type: Api
+          Properties:
+            Path: /login
+            Method: POST
+
+  CreateRoomFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/createRoom/
+      Handler: app.handler
+      Events:
+        CreateRoom:
+          Type: Api
+          Properties:
+            Path: /room
+            Method: POST
+
+  SendMessageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/sendMessage/
+      Handler: app.handler
+      Events:
+        SendMessage:
+          Type: Api
+          Properties:
+            Path: /message
+            Method: POST
+
+  GetMessageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/getMessage/
+      Handler: app.handler
+      Events:
+        GetMessage:
+          Type: Api
+          Properties:
+            Path: /message
+            Method: GET
+
+  ##############################
+  # DynamoDB Tables
+  ##############################
+
+  UsersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: UsersTable
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: userId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: userId
+          KeyType: HASH
+
+  RoomsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: RoomsTable
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: roomId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: roomId
+          KeyType: HASH
+
+  MessagesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: MessagesTable
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: roomId
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: N
+      KeySchema:
+        - AttributeName: roomId
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+
+Outputs:
+  WebSocketURL:
+    Description: "WebSocket API URL"
+    Value: !Sub "wss://${BChatWebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
