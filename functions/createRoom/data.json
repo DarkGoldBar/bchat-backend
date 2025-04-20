@@ -1,7 +1,0 @@
-{
-  "members": ["user-a", "user-b"],
-  "metadata": {
-    "game": "tictactoe",
-    "boardSize": 3
-  }
-}

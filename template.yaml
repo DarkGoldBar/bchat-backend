@@ -2,24 +2,43 @@ AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: BChat backend powered by AWS SAM
 
+Parameters:
+  JwtSecret:
+    Type: String
+    Description: Secret key used to sign JWT tokens
+
 Globals:
   Function:
     Timeout: 10
     Runtime: nodejs20.x
-    MemorySize: 128
+    MemorySize: 256
     Architectures:
       - arm64
     Environment:
       Variables:
+        JWT_SECRET: !Ref JwtSecret
         USERS_TABLE: UsersTable
         ROOMS_TABLE: RoomsTable
         MESSAGES_TABLE: MessagesTable
 
 Resources:
   ##############################
-  # WebSocket API
+  # SharedLayer
   ##############################
 
+  SharedLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: bchat-shared-layer
+      Description: Common utilities for BChat (auth, db, etc)
+      ContentUri: shared
+      CompatibleRuntimes:
+        - nodejs20.x
+      RetentionPolicy: Delete
+
+  ##############################
+  # WebSocket API
+  ##############################
   BChatWebSocketApi:
     Type: AWS::ApiGatewayV2::Api
     Properties:
@@ -27,114 +46,124 @@ Resources:
       ProtocolType: WEBSOCKET
       RouteSelectionExpression: "$request.body.action"
 
+  WebSocketHandlerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/websocketHandler/
+      Handler: app.handler
+      Runtime: nodejs20.x
+      MemorySize: 256
+      Timeout: 10
+      Layers:
+        - !Ref SharedLayer
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - AmazonDynamoDBFullAccess
+        - Statement:
+            - Effect: Allow
+              Action:
+                - execute-api:ManageConnections
+              Resource: "*"
+
+  WebSocketIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref BChatWebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebSocketHandlerFunction.Arn}/invocations
+      IntegrationMethod: POST
+
+  ConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref BChatWebSocketApi
+      RouteKey: $connect
+      Target: !Join ["/", ["integrations", !Ref WebSocketIntegration]]
+
+  DisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref BChatWebSocketApi
+      RouteKey: $disconnect
+      Target: !Join ["/", ["integrations", !Ref WebSocketIntegration]]
+
+  DefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref BChatWebSocketApi
+      RouteKey: $default
+      Target: !Join ["/", ["integrations", !Ref WebSocketIntegration]]
+
+  WebSocketDeployment:
+    Type: AWS::ApiGatewayV2::Deployment
+    DependsOn:
+      - ConnectRoute
+      - DisconnectRoute
+      - DefaultRoute
+    Properties:
+      ApiId: !Ref BChatWebSocketApi
+
   BChatWebSocketStage:
     Type: AWS::ApiGatewayV2::Stage
     Properties:
-      ApiId: !Ref BChatWebSocketApi
       StageName: prod
       AutoDeploy: true
+      DeploymentId: !Ref WebSocketDeployment
+      ApiId: !Ref BChatWebSocketApi
 
-  ##############################
-  # WebSocket Routes & Functions
-  ##############################
-
-  WebSocketConnectFunction:
-    Type: AWS::Serverless::Function
+  WebSocketInvokePermission:
+    Type: AWS::Lambda::Permission
     Properties:
-      CodeUri: functions/websocketConnect/
-      Handler: app.handler
-      Events:
-        Connect:
-          Type: Api
-          Properties:
-            Path: $connect
-            Method: GET
-            ApiId: !Ref BChatWebSocketApi
-
-  WebSocketDisconnectFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: functions/websocketDisconnect/
-      Handler: app.handler
-      Events:
-        Disconnect:
-          Type: Api
-          Properties:
-            Path: $disconnect
-            Method: GET
-            ApiId: !Ref BChatWebSocketApi
-
-  WebSocketMessageFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: functions/websocketMessage/
-      Handler: app.handler
-      Events:
-        Default:
-          Type: Api
-          Properties:
-            Path: $default
-            Method: POST
-            ApiId: !Ref BChatWebSocketApi
+      FunctionName: !Ref WebSocketHandlerFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${BChatWebSocketApi}/*
 
   ##############################
   # HTTP REST API Functions
   ##############################
 
-  RegisterUserFunction:
+  UserHandlerFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: functions/registerUser/
+      CodeUri: functions/userHandler/
       Handler: app.handler
+      Layers:
+        - !Ref SharedLayer
       Events:
-        Register:
+        User:
           Type: Api
           Properties:
-            Path: /register
+            Path: /user
             Method: POST
 
-  LoginUserFunction:
+  RoomHandlerFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: functions/loginUser/
+      CodeUri: functions/roomHandler/
       Handler: app.handler
+      Layers:
+        - !Ref SharedLayer
       Events:
-        Login:
-          Type: Api
-          Properties:
-            Path: /login
-            Method: POST
-
-  CreateRoomFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: functions/createRoom/
-      Handler: app.handler
-      Events:
-        CreateRoom:
+        Room:
           Type: Api
           Properties:
             Path: /room
             Method: POST
 
-  SendMessageFunction:
+  MessageHandlerFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: functions/sendMessage/
+      CodeUri: functions/messageHandler/
       Handler: app.handler
+      Layers:
+        - !Ref SharedLayer
       Events:
         SendMessage:
           Type: Api
           Properties:
             Path: /message
             Method: POST
-
-  GetMessageFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: functions/getMessage/
-      Handler: app.handler
-      Events:
         GetMessage:
           Type: Api
           Properties:
@@ -189,3 +218,15 @@ Outputs:
   WebSocketURL:
     Description: "WebSocket API URL"
     Value: !Sub "wss://${BChatWebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
+
+  UserHandlerFunctionURL:
+    Description: "User Handler Function URL"
+    Value: !Sub "https://${UserHandlerFunction}.execute-api.${AWS::Region}.amazonaws.com/Prod/user"
+
+  RoomHandlerFunctionURL:
+    Description: "Room Handler Function URL"
+    Value: !Sub "https://${RoomHandlerFunction}.execute-api.${AWS::Region}.amazonaws.com/Prod/room"
+
+  MessageHandlerFunctionURL:
+    Description: "Message Handler Function URL"
+    Value: !Sub "https://${MessageHandlerFunction}.execute-api.${AWS::Region}.amazonaws.com/Prod/message"

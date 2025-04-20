@@ -2,27 +2,25 @@
 
 ## 设计
 
-- 使用 NodeJS 语言，部分后端业务逻辑可以与前端通用
-- 主要架构 Lambda + GateWay + DynamDB
-- 实时通信：WebSocket（API Gateway + Lambda）
-- 完全使用 AWS 云服务作为后端，选用 AWS SAM 作为框架
-- 预想用户量小于 100，不使用消息队列
-- “一局游戏” 被抽象为一个特殊类型的房间（type=game），以消息流方式存储操作
-- 用户仅允许存在一个 WebSocket 连接
+- 使用的是 Node.js + AWS Lambda + DynamoDB + API Gateway 的无服务器架构
+- 使用的是 AWS SAM CLI 进行部署
+- 用户信息和消息队列都存储在 DynamoDB 中
+- 你将“游戏房间”设计为一种特殊的带元信息的聊天室
+- 总用户量大约在 100 人左右
+- WebSocket 实现实时通信
 
 ## 表结构
 
 1.  Users 表（用户资料）
 
-| 字段名       | 类型   | 说明                                   |
-| ------------ | ------ | -------------------------------------- |
-| userId       | string | 主键，唯一标识                         |
-| name         | string | 用户名                                 |
-| avatar       | string | 头像 URL                               |
-| password     | string | 加盐后的 MD5 哈希                      |
-| connectionId | string | 当前绑定的 WebSocket 连接 ID（可为空） |
-| status       | string | 状态（online / offline）               |
-| createdAt    | number | 注册时间戳                             |
+| 字段名       | 类型   | 说明                                          |
+| ------------ | ------ | --------------------------------------------- |
+| userId       | string | 主键，唯一标识                                |
+| name         | string | 用户名                                        |
+| avatar       | string | 头像的 URL                                    |
+| password     | string | 前端总是会发送加盐后的 MD5 哈希, 后端无需处理 |
+| connectionId | string | 当前绑定的 WebSocket 连接 ID（可为空）        |
+| createdAt    | number | 注册时间戳                                    |
 
 2.  Rooms 表（聊天/游戏房间）
 
