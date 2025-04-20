@@ -44,3 +44,9 @@
 | metadata  | map    | 附加信息，如动作坐标等           |
 
 ## 命令行
+
+- 构建 `sam build`
+- 验证 `sam validate`
+- 初次发布 `sam deploy -g`
+- 测试发布 `sam deploy`
+- 正式发布 `sam deploy --parameter-overrides JwtSecret=your_super_secret_value`

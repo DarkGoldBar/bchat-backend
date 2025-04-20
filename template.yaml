@@ -8,6 +8,8 @@ Parameters:
     Description: Secret key used to sign JWT tokens
 
 Globals:
+  Api:
+    EndpointConfiguration: REGIONAL
   Function:
     Timeout: 10
     Runtime: nodejs20.x
@@ -51,8 +53,6 @@ Resources:
     Properties:
       CodeUri: functions/websocketHandler/
       Handler: app.handler
-      Runtime: nodejs20.x
-      MemorySize: 256
       Timeout: 10
       Layers:
         - !Ref SharedLayer
@@ -122,6 +122,16 @@ Resources:
   ##############################
   # HTTP REST API Functions
   ##############################
+  HttpRestApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Auth:
+        ApiKeyRequired: true
+      Cors:
+        AllowMethods: "'OPTIONS,POST,GET'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
 
   UserHandlerFunction:
     Type: AWS::Serverless::Function
@@ -134,6 +144,7 @@ Resources:
         User:
           Type: Api
           Properties:
+            RestApiId: !Ref HttpRestApi
             Path: /user
             Method: POST
 
@@ -148,6 +159,7 @@ Resources:
         Room:
           Type: Api
           Properties:
+            RestApiId: !Ref HttpRestApi
             Path: /room
             Method: POST
 
@@ -162,11 +174,13 @@ Resources:
         SendMessage:
           Type: Api
           Properties:
+            RestApiId: !Ref HttpRestApi
             Path: /message
             Method: POST
         GetMessage:
           Type: Api
           Properties:
+            RestApiId: !Ref HttpRestApi
             Path: /message
             Method: GET
 
@@ -217,16 +231,8 @@ Resources:
 Outputs:
   WebSocketURL:
     Description: "WebSocket API URL"
-    Value: !Sub "wss://${BChatWebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/prod"
+    Value: !Sub "wss://${BChatWebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/${BChatWebSocketStage}"
 
-  UserHandlerFunctionURL:
-    Description: "User Handler Function URL"
-    Value: !Sub "https://${UserHandlerFunction}.execute-api.${AWS::Region}.amazonaws.com/Prod/user"
-
-  RoomHandlerFunctionURL:
-    Description: "Room Handler Function URL"
-    Value: !Sub "https://${RoomHandlerFunction}.execute-api.${AWS::Region}.amazonaws.com/Prod/room"
-
-  MessageHandlerFunctionURL:
-    Description: "Message Handler Function URL"
-    Value: !Sub "https://${MessageHandlerFunction}.execute-api.${AWS::Region}.amazonaws.com/Prod/message"
+  RestApiUrl:
+    Description: "Base URL for REST API (Stage: Prod)"
+    Value: !Sub "https://${HttpRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
