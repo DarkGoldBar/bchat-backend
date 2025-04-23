@@ -1,5 +1,5 @@
 const AWS = require("aws-sdk");
-const { verifyToken } = require("bchat-shared");
+const { verifyToken } = require("auth");
 
 const dynamo = new AWS.DynamoDB.DocumentClient();
 const MESSAGES_TABLE = process.env.MESSAGES_TABLE;

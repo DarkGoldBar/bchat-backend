@@ -1,5 +1,5 @@
 const AWS = require("aws-sdk");
-const { signToken } = require("bchat-shared");
+const { signToken } = require("auth");
 
 const dynamo = new AWS.DynamoDB.DocumentClient();
 const USERS_TABLE = process.env.USERS_TABLE;

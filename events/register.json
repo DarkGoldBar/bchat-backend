@@ -1,11 +1,11 @@
 {
-  "body": "{\"message\": \"hello world\"}",
+  "body": "{\"userId\": \"zhangsan\", \"password\": \"password\"}",
   "resource": "/{proxy+}",
   "path": "/path/to/resource",
   "httpMethod": "POST",
   "isBase64Encoded": false,
   "queryStringParameters": {
-    "foo": "bar"
+    "action": "register"
   },
   "pathParameters": {
     "proxy": "/path/to/resource"
@@ -53,7 +53,7 @@
       "userAgent": "Custom User Agent String",
       "user": null
     },
-    "path": "/prod/path/to/resource",
+    "path": "/user",
     "resourcePath": "/{proxy+}",
     "httpMethod": "POST",
     "apiId": "1234567890",

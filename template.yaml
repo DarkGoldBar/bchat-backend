@@ -15,7 +15,7 @@ Globals:
     Runtime: nodejs20.x
     MemorySize: 256
     Architectures:
-      - arm64
+      - x86_64
     Environment:
       Variables:
         JWT_SECRET: !Ref JwtSecret
@@ -140,6 +140,14 @@ Resources:
       Handler: app.handler
       Layers:
         - !Ref SharedLayer
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+              Resource:
+                - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*
       Events:
         User:
           Type: Api
@@ -170,6 +178,14 @@ Resources:
       Handler: app.handler
       Layers:
         - !Ref SharedLayer
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:Query
+              Resource:
+                - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*
       Events:
         SendMessage:
           Type: Api

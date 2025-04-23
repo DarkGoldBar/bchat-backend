@@ -1,9 +1,11 @@
 {
-  "name": "bchat-shared",
   "version": "1.0.0",
   "description": "Shared utilities for BChat backend (auth, db, utils)",
-  "main": "index.js",
+  "scripts": {
+    "build": "cp *.js ./node_modules"
+  },
   "dependencies": {
+    "aws-sdk": "^2.1692.0",
     "jsonwebtoken": "^9.0.0",
     "uuid": "^9.0.0"
   }
