@@ -126,8 +126,6 @@ Resources:
     Type: AWS::Serverless::Api
     Properties:
       StageName: Prod
-      Auth:
-        ApiKeyRequired: true
       Cors:
         AllowMethods: "'OPTIONS,POST,GET'"
         AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
@@ -155,6 +153,8 @@ Resources:
             RestApiId: !Ref HttpRestApi
             Path: /user
             Method: POST
+            Auth:
+              ApiKeyRequired: true
 
   RoomHandlerFunction:
     Type: AWS::Serverless::Function
@@ -170,6 +170,8 @@ Resources:
             RestApiId: !Ref HttpRestApi
             Path: /room
             Method: POST
+            Auth:
+              ApiKeyRequired: true
 
   MessageHandlerFunction:
     Type: AWS::Serverless::Function
@@ -193,12 +195,16 @@ Resources:
             RestApiId: !Ref HttpRestApi
             Path: /message
             Method: POST
+            Auth:
+              ApiKeyRequired: true
         GetMessage:
           Type: Api
           Properties:
             RestApiId: !Ref HttpRestApi
             Path: /message
             Method: GET
+            Auth:
+              ApiKeyRequired: true
 
   ##############################
   # DynamoDB Tables
