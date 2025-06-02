@@ -1,0 +1,12 @@
+{
+  "name": "room-handler",
+  "version": "1.0.0",
+  "description": "room-handler RESTAPI on API Gateway",
+  "main": "src/app.js",
+  "author": "DarkGoldBar",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "aws-sdk": "^2.1563.0"
+  }
+}

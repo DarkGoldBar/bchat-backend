@@ -1,44 +1,70 @@
 const AWS = require("aws-sdk");
-const { v4: uuidv4 } = require("uuid");
+const { User, Room } = require('./models');
 
 const dynamo = new AWS.DynamoDB.DocumentClient();
 const ROOMS_TABLE = process.env.ROOMS_TABLE;
 
+const maxRetries = 3;
+const roomIdLength = 4;
+
 exports.handler = async (event) => {
-  try {
-    const body = JSON.parse(event.body || "{}");
-    const { members, metadata = {} } = body;
+  const body = JSON.parse(event.body || "{}");
+  const { type } = body;
 
-    if (!Array.isArray(members) || members.length === 0) {
-      return response(400, { error: "Missing or invalid members" });
-    }
+  if (!type) {
+    return response(400, { error: "Missing type" });
+  }
 
-    const roomId = uuidv4();
-    const createdAt = Date.now();
+  return await createRoom(type)
+};
 
-    // TODO: 减少RoomID长度,增加尝试次数
-    // TODO: 设置 room 的 ttl（自动过期清理）
-    const item = {
-      roomId,
-      type: "game",
-      members,
-      metadata,
+async function createRoom(type) {
+  let roomId;
+  let room;
+  const createdAt = Math.floor(Date.now() / 1000);
+
+  for (let attempts = 0;attempts < maxRetries; attempts ++ ) {
+    roomId = generateRandomBase62String(roomIdLength);
+
+    room = {
+      id: roomId,
+      type: type,
+      members: [],
+      lastState: '',
+      metadata: {
+        stage: 'SETTING', // 'INGAME' | 'RESULT'
+      },
       updatedAt: createdAt,
+      ttl: createdAt + 86400 * 7,
     };
 
-    await dynamo
-      .put({
+    try {
+      // 如果房间不存在，则可以创建
+      await dynamo.put({
         TableName: ROOMS_TABLE,
-        Item: item,
-      })
-      .promise();
+        Item: room,
+        ConditionExpression: 'attribute_not_exists(id)'
+      }).promise();
+      return response(200, room);
 
-    return response(200, item);
-  } catch (err) {
-    console.error("Create room error:", err);
-    return response(500, { error: "Internal server error" });
+    } catch (error) {
+      if (error.code === 'ConditionalCheckFailedException') {
+        // 如果是因为条件检查失败（即房间已存在）
+        continue;
+      }
+      
+      // 其他错误直接抛出
+      throw error;
+    }
   }
-};
+
+  // 如果重试次数用完仍未成功
+  return response(503, {
+    message: 'Service temporarily unavailable',
+    details: 'Unable to create room after maximum retries 3'
+  });
+}
+
 
 function response(statusCode, body) {
   return {
@@ -50,4 +76,14 @@ function response(statusCode, body) {
     },
     body: JSON.stringify(body),
   };
+}
+
+
+function generateRandomBase62String(length) {
+  const base62Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let result = '';
+  for (let i = 0; i < length; i++) {
+    result += base62Chars.charAt(Math.floor(Math.random() * base62Chars.length));
+  }
+  return result;
 }

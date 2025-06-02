@@ -8,40 +8,47 @@
 - 你将“游戏房间”设计为一种特殊的带元信息的聊天室
 - 总用户量大约在 100 人左右
 - WebSocket 实现实时通信
+- 房间不保存历史消息记录，仅记录最终状况
 
 ## 表结构
 
-1.  Users 表（用户资料）
+1.  Rooms 表
 
-| 字段名       | 类型   | 说明                                          |
-| ------------ | ------ | --------------------------------------------- |
-| userId       | string | 主键，唯一标识                                |
-| name         | string | 用户名                                        |
-| avatar       | string | 头像的 URL                                    |
-| password     | string | 前端总是会发送加盐后的 MD5 哈希, 后端无需处理 |
-| connectionId | string | 当前绑定的 WebSocket 连接 ID（可为空）        |
-| createdAt    | number | 注册时间戳                                    |
-
-2.  Rooms 表（聊天/游戏房间）
-
-| 字段名    | 类型     | 说明                          |
-| --------- | -------- | ----------------------------- |
-| roomId    | string   | 主键，房间唯一 ID             |
-| type      | string   | "chat" or "game"              |
-| members   | string[] | 用户 ID 数组（或用 Set）      |
-| metadata  | map      | 如果是游戏房，存储状态/规则等 |
+| 字段名     | 类型     | 说明                          |
+| --------- | -------- | -----------------------------|
+| id        | string   | 主键，房间唯一 ID             |
+| type      | string   | "chat" or "${gametype}"      |
+| members   | string[] | interface User               |
+| spectator | string[] | interface User               |
+| lastState | string   | 保存最终状态json              |
+| metadata  | map      | 如果是游戏房，存储规则等       |
 | updatedAt | number   | 最后活跃时间戳                |
+| ttl       | number   | TTL                          |
 
-3.  Messages 表（消息记录/游戏指令）
 
-| 字段名    | 类型   | 说明                             |
-| --------- | ------ | -------------------------------- |
-| roomId    | string | 分区键                           |
-| timestamp | number | 排序键（消息顺序）               |
-| senderId  | string | 发消息的人                       |
-| content   | string | 文本内容/指令/游戏动作           |
-| type      | string | 消息类型（text, image, move 等） |
-| metadata  | map    | 附加信息，如动作坐标等           |
+## 数据结构
+
+``` TS
+interface User {
+    uuid: string
+    name: string
+    avatar: string
+    connectionID: string
+}
+```
+
+``` TS
+interface Room {
+    id: string
+    type: string
+    members: User[]
+    lastState: string
+    metadata: map
+    updatedAt: number
+    ttl: number
+}
+```
+
 
 ## 命令行
 

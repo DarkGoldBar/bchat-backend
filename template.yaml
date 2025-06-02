@@ -2,11 +2,6 @@ AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: BChat backend powered by AWS SAM
 
-Parameters:
-  JwtSecret:
-    Type: String
-    Description: Secret key used to sign JWT tokens
-
 Globals:
   Api:
     EndpointConfiguration: REGIONAL
@@ -18,26 +13,9 @@ Globals:
       - x86_64
     Environment:
       Variables:
-        JWT_SECRET: !Ref JwtSecret
-        USERS_TABLE: UsersTable
         ROOMS_TABLE: RoomsTable
-        MESSAGES_TABLE: MessagesTable
 
 Resources:
-  ##############################
-  # SharedLayer
-  ##############################
-
-  SharedLayer:
-    Type: AWS::Serverless::LayerVersion
-    Properties:
-      LayerName: bchat-shared-layer
-      Description: Common utilities for BChat (auth, db, etc)
-      ContentUri: shared
-      CompatibleRuntimes:
-        - nodejs20.x
-      RetentionPolicy: Delete
-
   ##############################
   # WebSocket API
   ##############################
@@ -54,8 +32,6 @@ Resources:
       CodeUri: functions/websocketHandler/
       Handler: app.handler
       Timeout: 10
-      Layers:
-        - !Ref SharedLayer
       Policies:
         - AWSLambdaBasicExecutionRole
         - AmazonDynamoDBFullAccess
@@ -131,38 +107,11 @@ Resources:
         AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
         AllowOrigin: "'*'"
 
-  UserHandlerFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: functions/userHandler/
-      Handler: app.handler
-      Layers:
-        - !Ref SharedLayer
-      Policies:
-        - Statement:
-            - Effect: Allow
-              Action:
-                - dynamodb:GetItem
-                - dynamodb:PutItem
-              Resource:
-                - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*
-      Events:
-        User:
-          Type: Api
-          Properties:
-            RestApiId: !Ref HttpRestApi
-            Path: /user
-            Method: POST
-            Auth:
-              ApiKeyRequired: true
-
   RoomHandlerFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: functions/roomHandler/
       Handler: app.handler
-      Layers:
-        - !Ref SharedLayer
       Events:
         Room:
           Type: Api
@@ -173,54 +122,9 @@ Resources:
             Auth:
               ApiKeyRequired: true
 
-  MessageHandlerFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: functions/messageHandler/
-      Handler: app.handler
-      Layers:
-        - !Ref SharedLayer
-      Policies:
-        - Statement:
-            - Effect: Allow
-              Action:
-                - dynamodb:PutItem
-                - dynamodb:Query
-              Resource:
-                - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*
-      Events:
-        SendMessage:
-          Type: Api
-          Properties:
-            RestApiId: !Ref HttpRestApi
-            Path: /message
-            Method: POST
-            Auth:
-              ApiKeyRequired: true
-        GetMessage:
-          Type: Api
-          Properties:
-            RestApiId: !Ref HttpRestApi
-            Path: /message
-            Method: GET
-            Auth:
-              ApiKeyRequired: true
-
   ##############################
   # DynamoDB Tables
   ##############################
-
-  UsersTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      TableName: UsersTable
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - AttributeName: userId
-          AttributeType: S
-      KeySchema:
-        - AttributeName: userId
-          KeyType: HASH
 
   RoomsTable:
     Type: AWS::DynamoDB::Table
@@ -228,27 +132,14 @@ Resources:
       TableName: RoomsTable
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
-        - AttributeName: roomId
+        - AttributeName: id
           AttributeType: S
       KeySchema:
-        - AttributeName: roomId
+        - AttributeName: id
           KeyType: HASH
-
-  MessagesTable:
-    Type: AWS::DynamoDB::Table
-    Properties:
-      TableName: MessagesTable
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - AttributeName: roomId
-          AttributeType: S
-        - AttributeName: timestamp
-          AttributeType: N
-      KeySchema:
-        - AttributeName: roomId
-          KeyType: HASH
-        - AttributeName: timestamp
-          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
 
 Outputs:
   WebSocketURL:

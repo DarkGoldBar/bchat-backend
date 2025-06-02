@@ -5,7 +5,7 @@ const apiGateway = new AWS.ApiGatewayManagementApi({
   endpoint: process.env.WEBSOCKET_ENDPOINT, // 需通过环境变量注入完整 wss://.../prod
 });
 
-const USERS_TABLE = process.env.USERS_TABLE;
+const ROOM_TABLE = process.env.ROOM_TABLE;
 
 exports.handler = async (event) => {
   const route = event.requestContext.routeKey;
@@ -15,90 +15,140 @@ exports.handler = async (event) => {
       return await handleConnect(event);
     case "$disconnect":
       return await handleDisconnect(event);
+    case "join":
+      return await handleJoin(event);
     case "$default":
     default:
       return await handleMessage(event);
   }
 };
 
-// 当客户端连接时
 async function handleConnect(event) {
-  const connectionId = event.requestContext.connectionId;
-  const now = Date.now();
-
-  // 可选择在 queryString 中传 userId 并在此处认证绑定
-  const userId = event.queryStringParameters?.userId || `anon-${connectionId}`;
-
-  await dynamo
-    .update({
-      TableName: USERS_TABLE,
-      Key: { userId },
-      UpdateExpression: "SET connectionId = :connId, lastSeen = :now",
-      ExpressionAttributeValues: {
-        ":connId": connectionId,
-        ":now": now,
-      },
-    })
-    .promise()
-    .catch((err) => {
-      console.warn("User not found or error updating:", err);
-    });
-
-  return { statusCode: 200, body: "Connected." };
+  // 直接返回成功
+  return { statusCode: 200 };
 }
 
-// 当客户端断开连接
+async function handleJoin(event) {
+  const connectionId = event.requestContext.connectionId;
+  const body = JSON.parse(event.body);
+  const { roomId, user } = body;
+
+  // 获取房间信息
+  const { Item: room } = await dynamo.get({
+    TableName: ROOM_TABLE,
+    Key: { id: roomId }
+  }).promise();
+
+  if (!room) {
+    return { statusCode: 404 };
+  }
+
+  // 更新用户的 connectionId
+  user.connectionID = connectionId;
+
+  // 将用户添加到房间成员列表
+  room.members.push(user);
+
+  // 更新房间的 members
+  await dynamo.update({
+    TableName: ROOM_TABLE,
+    Key: { id: roomId },
+    UpdateExpression: 'SET members = list_append(members, :newMember)',
+    ExpressionAttributeValues: {
+      ':newMember': [user]
+    }
+  }).promise();
+
+  // 广播更新
+  await broadcast(room.members, {
+    type: 'memberUpdate',
+    members: room.members
+  });
+
+  return { statusCode: 200 };
+}
+
 async function handleDisconnect(event) {
   const connectionId = event.requestContext.connectionId;
 
-  // 根据 connectionId 清空记录（粗略做法）
-  const scan = await dynamo
-    .scan({
-      TableName: USERS_TABLE,
-      FilterExpression: "connectionId = :connId",
-      ExpressionAttributeValues: {
-        ":connId": connectionId,
-      },
-      ProjectionExpression: "userId",
-    })
-    .promise();
+  // 扫描所有房间找到包含此连接的用户
+  const { Items: rooms } = await dynamo.scan({
+    TableName: ROOM_TABLE
+  }).promise();
 
-  for (const user of scan.Items || []) {
-    await dynamo
-      .update({
-        TableName: USERS_TABLE,
-        Key: { userId: user.userId },
-        UpdateExpression: "REMOVE connectionId",
-      })
-      .promise();
-  }
+  for (const room of rooms) {
+    let updated = false;
 
-  return { statusCode: 200, body: "Disconnected." };
-}
-
-// 默认接收消息并处理
-async function handleMessage(event) {
-  const connectionId = event.requestContext.connectionId;
-  let body;
-
-  try {
-    body = JSON.parse(event.body);
-  } catch (err) {
-    return { statusCode: 400, body: "Invalid JSON" };
-  }
-
-  const message = body.message || "[empty message]";
-
-  // 回送回当前连接
-  await apiGateway
-    .postToConnection({
-      ConnectionId: connectionId,
-      Data: JSON.stringify({ echo: message }),
-    })
-    .promise()
-    .catch((err) => {
-      console.error("Failed to send echo:", err);
+    // 检查并更新 members
+    room.members = room.members.map(member => {
+      if (member.connectionID === connectionId) {
+        updated = true;
+        return { ...member, connectionID: null };
+      }
+      return member;
     });
 
-  return { statusCode: 200, body: "Message received." };
+    if (updated) {
+      // 更新房间信息
+      await dynamo.put({
+        TableName: ROOM_TABLE,
+        Item: room
+      }).promise();
+
+      // 广播更新
+      await broadcast(room.members, {
+        type: 'memberUpdate',
+        members: room.members
+      });
+    }
+  }
+
+  return { statusCode: 200 };
+}
+
+async function handleMessage(event) {
+  const body = JSON.parse(event.body);
+  const { roomId, message } = body;
+
+  // 获取房间信息
+  const { Item: room } = await dynamo.get({
+    TableName: ROOM_TABLE,
+    Key: { id: roomId }
+  }).promise();
+
+  if (!room) {
+    return { statusCode: 404 };
+  }
+
+  // 直接广播消息
+  await broadcast(room.members, {
+    type: 'message',
+    message: message
+  });
+
+  return { statusCode: 200 };
+}
+
+
+// 广播函数
+async function broadcast(users, payload) {
+  const broadcasts = users.map(async (user) => {
+    try {
+      if (!user.connectionID) return;
+
+      await apiGateway.postToConnection({
+        ConnectionId: user.connectionID,
+        Data: JSON.stringify(payload)
+      }).promise();
+    } catch (err) {
+      if (err.statusCode === 410) {
+        // 连接已断开，忽略错误
+        console.log(`Connection ${user.connectionID} not found`);
+      } else {
+        throw err;
+      }
+    }
+  });
+
+  await Promise.all(broadcasts);
 }
