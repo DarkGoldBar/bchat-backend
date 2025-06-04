@@ -1,5 +1,6 @@
 {
   "name": "room-handler",
+  "type": "module",
   "version": "1.0.0",
   "description": "room-handler RESTAPI on API Gateway",
   "main": "src/app.js",

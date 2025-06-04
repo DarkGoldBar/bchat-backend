@@ -1,7 +1,8 @@
 {
-  "name": "room-handler",
+  "name": "websocket-handler",
+  "type": "module",
   "version": "1.0.0",
-  "description": "room-handler RESTAPI on API Gateway",
+  "description": "websocket on API Gateway",
   "main": "src/app.js",
   "author": "DarkGoldBar",
   "license": "MIT",

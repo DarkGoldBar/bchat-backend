@@ -1,5 +1,5 @@
-const AWS = require("aws-sdk");
-const { User, Room } = require('./models');
+import AWS from 'aws-sdk';
+import { Room } from './model.js';
 
 const dynamo = new AWS.DynamoDB.DocumentClient();
 const ROOMS_TABLE = process.env.ROOMS_TABLE;
@@ -7,45 +7,39 @@ const ROOMS_TABLE = process.env.ROOMS_TABLE;
 const maxRetries = 3;
 const roomIdLength = 4;
 
-exports.handler = async (event) => {
-  const body = JSON.parse(event.body || "{}");
-  const { type } = body;
+export const handler = async (event) => {
+  const queryParams = event.queryStringParameters || {};
+
+  const { type } = queryParams;
 
   if (!type) {
-    return response(400, { error: "Missing type" });
+    return {
+      statusCode: 400,
+      body: JSON.stringify({ message: 'type is required' })
+    };
   }
 
   return await createRoom(type)
 };
 
 async function createRoom(type) {
-  let roomId;
-  let room;
-  const createdAt = Math.floor(Date.now() / 1000);
+  /** @type {String?} */
+  let id;
+  /** @type {Object} */
+  let roominfo;
 
   for (let attempts = 0;attempts < maxRetries; attempts ++ ) {
-    roomId = generateRandomBase62String(roomIdLength);
-
-    room = {
-      id: roomId,
-      type: type,
-      members: [],
-      lastState: '',
-      metadata: {
-        stage: 'SETTING', // 'INGAME' | 'RESULT'
-      },
-      updatedAt: createdAt,
-      ttl: createdAt + 86400 * 7,
-    };
+    id = generateRandomBase62String(roomIdLength);
+    roominfo = Room({ id, type} ).getRoomInfo()
 
     try {
       // 如果房间不存在，则可以创建
       await dynamo.put({
         TableName: ROOMS_TABLE,
-        Item: room,
+        Item: roominfo,
         ConditionExpression: 'attribute_not_exists(id)'
       }).promise();
-      return response(200, room);
+      return response(200, JSON.stringify(roominfo));
 
     } catch (error) {
       if (error.code === 'ConditionalCheckFailedException') {

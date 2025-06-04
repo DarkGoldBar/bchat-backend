@@ -7,25 +7,73 @@ const apiGateway = new AWS.ApiGatewayManagementApi({
 
 const ROOM_TABLE = process.env.ROOM_TABLE;
 
-exports.handler = async (event) => {
+export const handler = async (event) => {
   const route = event.requestContext.routeKey;
+  const queryParams = event.queryStringParameters || {};
 
-  switch (route) {
-    case "$connect":
-      return await handleConnect(event);
-    case "$disconnect":
-      return await handleDisconnect(event);
-    case "join":
-      return await handleJoin(event);
-    case "$default":
-    default:
-      return await handleMessage(event);
+  const roomId = queryParams.room;
+
+  if (!roomId) {
+    return {
+      statusCode: 400,
+      body: JSON.stringify({ message: 'Room ID is required' })
+    };
+  }
+
+  try {
+    switch (route) {
+      case "$connect":
+        return await handleConnect(roomId);
+      case "$disconnect":
+        return await handleDisconnect(event);
+      case "join":
+        return await handleJoin(event);
+      case "$default":
+      default:
+        return await handleMessage(event);
+    }
+  } catch (error) {
+    console.error('Connection error:', error);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ message: 'Internal server error' })
+    };
   }
 };
 
-async function handleConnect(event) {
-  // 直接返回成功
-  return { statusCode: 200 };
+async function handleConnect(roomId) {
+  // 查询数据库中是否存在该房间
+  const params = {
+    TableName: ROOM_TABLE,
+    Key: {
+      roomId: roomId
+    }
+  };
+
+  try {
+    const result = await dynamo.get(params).promise();
+
+    // 如果房间存在，返回成功状态码
+    if (result.Item) {
+      return {
+        statusCode: 200,
+        body: JSON.stringify({ message: 'Connection successful' })
+      };
+    } else {
+      // 如果房间不存在，返回404
+      return {
+        statusCode: 404,
+        body: JSON.stringify({ message: 'Room not found' })
+      };
+    }
+  } catch (dbError) {
+    // 数据库查询错误
+    console.error('Database error:', dbError);
+    return {
+      statusCode: 500,
+      body: JSON.stringify({ message: 'Internal server error' })
+    };
+  }
 }
 
 async function handleJoin(event) {
