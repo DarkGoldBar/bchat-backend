@@ -6,8 +6,9 @@
   "main": "src/app.js",
   "author": "DarkGoldBar",
   "license": "MIT",
-  "dependencies": {},
-  "devDependencies": {
-    "aws-sdk": "^2.1563.0"
+  "dependencies": {
+    "@aws-sdk/client-apigatewaymanagementapi": "^3.823.0",
+    "@aws-sdk/client-dynamodb": "^3.823.0",
+    "@aws-sdk/lib-dynamodb": "^3.823.0"
   }
 }

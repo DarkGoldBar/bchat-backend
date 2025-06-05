@@ -1,7 +1,14 @@
-import AWS from "aws-sdk";
-/** @typedef {import('./types.js')} T */
+/** @typedef {import('../types.js').Room} Room */
 
-const dynamo = new AWS.DynamoDB.DocumentClient();
+const { PutCommand } = require("@aws-sdk/lib-dynamodb");
+const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
+const { DynamoDBDocumentClient } = require("@aws-sdk/lib-dynamodb");
+
+// 创建底层 DynamoDB 客户端
+const ddbClient = new DynamoDBClient({});
+// 创建文档客户端（支持自动转换 JS 对象）
+const dynamo = DynamoDBDocumentClient.from(ddbClient);
+
 const ROOMS_TABLE = process.env.ROOMS_TABLE;
 
 const maxRetries = 3;
@@ -23,11 +30,11 @@ export const handler = async (event) => {
 };
 
 async function createRoom(type) {
-  /** @type {String?} */
-  let id;
-  /** @type {T.Room} */
+  /** @type {String} */
+  let id = "";
+  /** @type {Room} */
   let room = {
-    id: "",
+    id,
     type,
     members: [],
     lastState: "",
@@ -46,14 +53,14 @@ async function createRoom(type) {
 
     try {
       // 如果房间不存在，则可以创建
-      await dynamo
-        .put({
+      await dynamo.send(
+        new PutCommand({
           TableName: ROOMS_TABLE,
-          Item: roominfo,
+          Item: room,
           ConditionExpression: "attribute_not_exists(id)",
         })
-        .promise();
-      return response(200, JSON.stringify(roominfo));
+      );
+      return response(200, JSON.stringify(room));
     } catch (error) {
       if (error.code === "ConditionalCheckFailedException") {
         // 如果是因为条件检查失败（即房间已存在）

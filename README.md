@@ -10,45 +10,41 @@
 - WebSocket 实现实时通信
 - 房间不保存历史消息记录，仅记录最终状况
 
-## 表结构
+## 数据库
 
-1.  Rooms 表
+- DynamoDB 中只存在一个 Room 表。这个表的数据结构与"类型定义"中的`Room`类完全相同。
 
-| 字段名     | 类型     | 说明                          |
-| --------- | -------- | -----------------------------|
-| id        | string   | 主键，房间唯一 ID             |
-| type      | string   | "chat" or "${gametype}"      |
-| members   | string[] | interface User               |
-| spectator | string[] | interface User               |
-| lastState | string   | 保存最终状态json              |
-| metadata  | map      | 如果是游戏房，存储规则等       |
-| updatedAt | number   | 最后活跃时间戳                |
-| ttl       | number   | TTL                          |
+## 类型定义
 
+```JS
+/**
+ * @typedef {Object} User
+ * @property {string} uuid - 用户唯一标识
+ * @property {string} name - 用户名
+ * @property {string} avatar - 用户头像
+ * @property {string} [connectID] - 连接ID
+ * @property {number} [position] - 房间中的位置
+ */
 
-## 数据结构
+/**
+ * @typedef {Object} Room
+ * @property {string} id - 房间ID
+ * @property {string} type - 房间类型
+ * @property {string[]} members - 房间成员
+ * @property {string} lastState - 最后状态
+ * @property {Object} metadata - 元数据
+ * @property {number} createdAt - 创建时间
+ * @property {number} ttl - 生存时间
+ * @property {number} version - 乐观锁版本
+ */
 
-``` TS
-interface User {
-    uuid: string
-    name: string
-    avatar: string
-    connectionID: string
-}
+/**
+ * @typedef {Object} metadata
+ * @property {'WAITING' | 'INGAME' | 'END'} stage - 状态
+ * @property {number} memberLimit - 最大人数
+ */
+export {};
 ```
-
-``` TS
-interface Room {
-    id: string
-    type: string
-    members: User[]
-    lastState: string
-    metadata: map
-    updatedAt: number
-    ttl: number
-}
-```
-
 
 ## 命令行
 
@@ -56,4 +52,3 @@ interface Room {
 - 验证 `sam validate`
 - 初次发布 `sam deploy -g`
 - 测试发布 `sam deploy`
-- 正式发布 `sam deploy --parameter-overrides JwtSecret=your_super_secret_value`
