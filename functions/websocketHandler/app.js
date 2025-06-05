@@ -2,7 +2,7 @@
 /** @typedef {import('../types.js').User} User */
 /** @typedef {import('../types.js').WebSocketEvent} WebSocketEvent */
 
-const { GetCommand } = require("@aws-sdk/lib-dynamodb");
+const { GetCommand, UpdateCommand } = require("@aws-sdk/lib-dynamodb");
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
 const { DynamoDBDocumentClient } = require("@aws-sdk/lib-dynamodb");
 const {
@@ -17,7 +17,8 @@ const dynamo = DynamoDBDocumentClient.from(ddbClient);
 const apiGateway = new ApiGatewayManagementApiClient({
   endpoint: process.env.WEBSOCKET_ENDPOINT,
 });
-
+// 获取环境变量中的房间表名
+/** @type {string} */
 const ROOM_TABLE = process.env.ROOM_TABLE;
 
 /**
@@ -160,9 +161,88 @@ async function broadcast(room, payload) {
   await Promise.all(broadcasts);
 }
 
-async function updateRoomUser(room, user, index) {}
+/**
+ * 使用乐观锁更新房间中的用户数据
+ * @param {Room} room - 当前房间对象
+ * @param {User} user - 需要更新的用户对象
+ * @param {number} index - 用户在 members 数组中的位置
+ * @returns {Promise<{statusCode: number, error?: string}>}
+ */
+export async function updateRoomUser(room, user, index) {
+  try {
+    const result = await ddbClient.send(
+      new UpdateCommand({
+        TableName: ROOM_TABLE, // 确保与你 DynamoDB 中的表名一致
+        Key: { id: room.id },
+        ConditionExpression: "#ver = :ver",
+        UpdateExpression: `SET #members[${index}].connectID = :cid, #ver = :newVer`,
+        ExpressionAttributeNames: {
+          "#members": "members",
+          "#ver": "version",
+        },
+        ExpressionAttributeValues: {
+          ":cid": user.connectID,
+          ":ver": room.version,
+          ":newVer": room.version + 1,
+        },
+        ReturnValues: "NONE",
+      })
+    );
 
-async function deleteRoomUser(room, user, index) {}
+    return { statusCode: 200 };
+  } catch (err) {
+    if (err.name === "ConditionalCheckFailedException") {
+      return {
+        statusCode: 409,
+        error: "Version mismatch — concurrent update detected.",
+      };
+    }
+    return { statusCode: 500, error: err.message || "Unknown error" };
+  }
+}
+
+/**
+ * 删除指定 index 的成员，仅当其字符串等于当前 user 对象的 JSON 表达
+ * @param {Room} room - 房间对象
+ * @param {User} user - 用户对象（将被 stringified）
+ * @param {number} index - 要删除的成员在 members 数组中的位置
+ * @returns {Promise<{statusCode: number, error?: string}>}
+ */
+async function deleteRoomUser(room, user, index) {
+  try {
+    const userString = JSON.stringify(user);
+
+    const command = new UpdateCommand({
+      TableName: "Room",
+      Key: { id: room.id },
+      UpdateExpression: `REMOVE #members[${index}] SET #version = :newVer`,
+      ConditionExpression: `#members[${index}] = :expected`,
+      ExpressionAttributeNames: {
+        "#members": "members",
+        "#version": "version",
+      },
+      ExpressionAttributeValues: {
+        ":expected": userString,
+        ":newVer": (room.version || 0) + 1,
+      },
+    });
+
+    await dynamo.send(command);
+
+    return { statusCode: 200 };
+  } catch (err) {
+    if (err.name === "ConditionalCheckFailedException") {
+      return {
+        statusCode: 409,
+        error: "Mismatch: user at target index is not as expected",
+      };
+    }
+    return {
+      statusCode: 500,
+      error: err.message || "Failed to delete room member",
+    };
+  }
+}
 
 /**
  * @typedef {Object} getRoomResult
