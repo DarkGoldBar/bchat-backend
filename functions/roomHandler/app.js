@@ -1,5 +1,5 @@
-import AWS from 'aws-sdk';
-import { Room } from './model.js';
+import AWS from "aws-sdk";
+/** @typedef {import('./types.js')} T */
 
 const dynamo = new AWS.DynamoDB.DocumentClient();
 const ROOMS_TABLE = process.env.ROOMS_TABLE;
@@ -15,38 +15,51 @@ export const handler = async (event) => {
   if (!type) {
     return {
       statusCode: 400,
-      body: JSON.stringify({ message: 'type is required' })
+      body: JSON.stringify({ message: "type is required" }),
     };
   }
 
-  return await createRoom(type)
+  return await createRoom(type);
 };
 
 async function createRoom(type) {
   /** @type {String?} */
   let id;
-  /** @type {Object} */
-  let roominfo;
+  /** @type {T.Room} */
+  let room = {
+    id: "",
+    type,
+    members: [],
+    lastState: "",
+    metadata: {
+      stage: "WAITING",
+      memberLimit: 2, // 默认最大人数为2
+    },
+    createdAt: Math.floor(Date.now() / 1000), // 当前时间戳（秒）
+    ttl: Math.floor(Date.now() / 1000) + 86400 * 7, // 7天后过期
+    version: 1, // 乐观锁版本初始为1
+  };
 
-  for (let attempts = 0;attempts < maxRetries; attempts ++ ) {
+  for (let attempts = 0; attempts < maxRetries; attempts++) {
     id = generateRandomBase62String(roomIdLength);
-    roominfo = Room({ id, type} ).getRoomInfo()
+    room.id = id;
 
     try {
       // 如果房间不存在，则可以创建
-      await dynamo.put({
-        TableName: ROOMS_TABLE,
-        Item: roominfo,
-        ConditionExpression: 'attribute_not_exists(id)'
-      }).promise();
+      await dynamo
+        .put({
+          TableName: ROOMS_TABLE,
+          Item: roominfo,
+          ConditionExpression: "attribute_not_exists(id)",
+        })
+        .promise();
       return response(200, JSON.stringify(roominfo));
-
     } catch (error) {
-      if (error.code === 'ConditionalCheckFailedException') {
+      if (error.code === "ConditionalCheckFailedException") {
         // 如果是因为条件检查失败（即房间已存在）
         continue;
       }
-      
+
       // 其他错误直接抛出
       throw error;
     }
@@ -54,11 +67,10 @@ async function createRoom(type) {
 
   // 如果重试次数用完仍未成功
   return response(503, {
-    message: 'Service temporarily unavailable',
-    details: 'Unable to create room after maximum retries 3'
+    message: "Service temporarily unavailable",
+    details: "Unable to create room after maximum retries 3",
   });
 }
-
 
 function response(statusCode, body) {
   return {
@@ -72,12 +84,14 @@ function response(statusCode, body) {
   };
 }
 
-
 function generateRandomBase62String(length) {
-  const base62Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let result = '';
+  const base62Chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  let result = "";
   for (let i = 0; i < length; i++) {
-    result += base62Chars.charAt(Math.floor(Math.random() * base62Chars.length));
+    result += base62Chars.charAt(
+      Math.floor(Math.random() * base62Chars.length)
+    );
   }
   return result;
 }

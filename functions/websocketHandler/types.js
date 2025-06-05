@@ -3,7 +3,7 @@
  * @property {string} uuid - 用户唯一标识
  * @property {string} name - 用户名
  * @property {string} avatar - 用户头像
- * @property {string} [connectId] - 连接ID
+ * @property {string} [connectionID] - 连接ID
  * @property {number} [position] - 房间中的位置
  */
 

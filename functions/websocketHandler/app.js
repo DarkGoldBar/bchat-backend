@@ -1,4 +1,5 @@
-const AWS = require("aws-sdk");
+import AWS from "aws-sdk";
+/** @typedef {import('./types.js')} T */
 
 const dynamo = new AWS.DynamoDB.DocumentClient();
 const apiGateway = new AWS.ApiGatewayManagementApi({
@@ -12,11 +13,13 @@ export const handler = async (event) => {
   const queryParams = event.queryStringParameters || {};
 
   const roomId = queryParams.room;
+  const body = JSON.parse(event.body);
+  const connectId = event["requestContext"]["connectionId"];
 
   if (!roomId) {
     return {
       statusCode: 400,
-      body: JSON.stringify({ message: 'Room ID is required' })
+      body: JSON.stringify({ message: "Room ID is required" }),
     };
   }
 
@@ -25,18 +28,20 @@ export const handler = async (event) => {
       case "$connect":
         return await handleConnect(roomId);
       case "$disconnect":
-        return await handleDisconnect(event);
+        return await handleDisconnect(roomId, connectId);
       case "join":
-        return await handleJoin(event);
+        return await handleJoin(roomId, body, connectId);
+      case "changeposition":
+        return await handleChangePosition(roomId, body, connectId);
       case "$default":
       default:
         return await handleMessage(event);
     }
   } catch (error) {
-    console.error('Connection error:', error);
+    console.error("Connection error:", error);
     return {
       statusCode: 500,
-      body: JSON.stringify({ message: 'Internal server error' })
+      body: JSON.stringify({ message: "Internal server error" }),
     };
   }
 };
@@ -46,8 +51,8 @@ async function handleConnect(roomId) {
   const params = {
     TableName: ROOM_TABLE,
     Key: {
-      roomId: roomId
-    }
+      roomId: roomId,
+    },
   };
 
   try {
@@ -57,23 +62,63 @@ async function handleConnect(roomId) {
     if (result.Item) {
       return {
         statusCode: 200,
-        body: JSON.stringify({ message: 'Connection successful' })
+        body: JSON.stringify({ message: "Connection successful" }),
       };
     } else {
       // 如果房间不存在，返回404
       return {
         statusCode: 404,
-        body: JSON.stringify({ message: 'Room not found' })
+        body: JSON.stringify({ message: "Room not found" }),
       };
     }
   } catch (dbError) {
     // 数据库查询错误
-    console.error('Database error:', dbError);
+    console.error("Database error:", dbError);
     return {
       statusCode: 500,
-      body: JSON.stringify({ message: 'Internal server error' })
+      body: JSON.stringify({ message: "Internal server error" }),
     };
   }
+}
+
+async function handleDisconnect(roomId, connectId) {
+  // 扫描所有房间找到包含此连接的用户
+  const { Items: rooms } = await dynamo
+    .scan({
+      TableName: ROOM_TABLE,
+    })
+    .promise();
+
+  for (const room of rooms) {
+    let updated = false;
+
+    // 检查并更新 members
+    room.members = room.members.map((member) => {
+      if (member.connectionID === connectionId) {
+        updated = true;
+        return { ...member, connectionID: null };
+      }
+      return member;
+    });
+
+    if (updated) {
+      // 更新房间信息
+      await dynamo
+        .put({
+          TableName: ROOM_TABLE,
+          Item: room,
+        })
+        .promise();
+
+      // 广播更新
+      await broadcast(room.members, {
+        type: "memberUpdate",
+        members: room.members,
+      });
+    }
+  }
+
+  return { statusCode: 200 };
 }
 
 async function handleJoin(event) {
@@ -82,10 +127,12 @@ async function handleJoin(event) {
   const { roomId, user } = body;
 
   // 获取房间信息
-  const { Item: room } = await dynamo.get({
-    TableName: ROOM_TABLE,
-    Key: { id: roomId }
-  }).promise();
+  const { Item: room } = await dynamo
+    .get({
+      TableName: ROOM_TABLE,
+      Key: { id: roomId },
+    })
+    .promise();
 
   if (!room) {
     return { statusCode: 404 };
@@ -98,58 +145,22 @@ async function handleJoin(event) {
   room.members.push(user);
 
   // 更新房间的 members
-  await dynamo.update({
-    TableName: ROOM_TABLE,
-    Key: { id: roomId },
-    UpdateExpression: 'SET members = list_append(members, :newMember)',
-    ExpressionAttributeValues: {
-      ':newMember': [user]
-    }
-  }).promise();
+  await dynamo
+    .update({
+      TableName: ROOM_TABLE,
+      Key: { id: roomId },
+      UpdateExpression: "SET members = list_append(members, :newMember)",
+      ExpressionAttributeValues: {
+        ":newMember": [user],
+      },
+    })
+    .promise();
 
   // 广播更新
   await broadcast(room.members, {
-    type: 'memberUpdate',
-    members: room.members
+    type: "memberUpdate",
+    members: room.members,
   });
-
-  return { statusCode: 200 };
-}
-
-async function handleDisconnect(event) {
-  const connectionId = event.requestContext.connectionId;
-
-  // 扫描所有房间找到包含此连接的用户
-  const { Items: rooms } = await dynamo.scan({
-    TableName: ROOM_TABLE
-  }).promise();
-
-  for (const room of rooms) {
-    let updated = false;
-
-    // 检查并更新 members
-    room.members = room.members.map(member => {
-      if (member.connectionID === connectionId) {
-        updated = true;
-        return { ...member, connectionID: null };
-      }
-      return member;
-    });
-
-    if (updated) {
-      // 更新房间信息
-      await dynamo.put({
-        TableName: ROOM_TABLE,
-        Item: room
-      }).promise();
-
-      // 广播更新
-      await broadcast(room.members, {
-        type: 'memberUpdate',
-        members: room.members
-      });
-    }
-  }
 
   return { statusCode: 200 };
 }
@@ -159,10 +170,12 @@ async function handleMessage(event) {
   const { roomId, message } = body;
 
   // 获取房间信息
-  const { Item: room } = await dynamo.get({
-    TableName: ROOM_TABLE,
-    Key: { id: roomId }
-  }).promise();
+  const { Item: room } = await dynamo
+    .get({
+      TableName: ROOM_TABLE,
+      Key: { id: roomId },
+    })
+    .promise();
 
   if (!room) {
     return { statusCode: 404 };
@@ -170,13 +183,12 @@ async function handleMessage(event) {
 
   // 直接广播消息
   await broadcast(room.members, {
-    type: 'message',
-    message: message
+    type: "message",
+    message: message,
   });
 
   return { statusCode: 200 };
 }
-
 
 // 广播函数
 async function broadcast(users, payload) {
@@ -184,10 +196,12 @@ async function broadcast(users, payload) {
     try {
       if (!user.connectionID) return;
 
-      await apiGateway.postToConnection({
-        ConnectionId: user.connectionID,
-        Data: JSON.stringify(payload)
-      }).promise();
+      await apiGateway
+        .postToConnection({
+          ConnectionId: user.connectionID,
+          Data: JSON.stringify(payload),
+        })
+        .promise();
     } catch (err) {
       if (err.statusCode === 410) {
         // 连接已断开，忽略错误
