@@ -41,11 +41,25 @@ export const handler = async (event) => {
   if (!roomId) {
     return {
       statusCode: 400,
-      error: JSON.stringify({ message: "Room ID is required" }),
+      error: "Room ID is required",
     };
   }
 
-  try {
+  /** @type {WebSocketResult} */
+  let result = { statusCode: 500 }
+  for (let trials = 0; trials < MAX_409_RETRY; trials++) {
+    result = await router();
+    if (result.statusCode !== 409) {
+      return result;
+    }
+  }
+  return result;
+
+  /**
+   * 
+   * @returns {Promise<WebSocketResult>}
+   */
+  async function router() {
     switch (route) {
       case "$connect":
         return await handleConnect(roomId);
@@ -61,12 +75,6 @@ export const handler = async (event) => {
       default:
         return await handleDefault(roomId, body, connectId);
     }
-  } catch (error) {
-    console.error("Connection error:", error);
-    return {
-      statusCode: 500,
-      error: JSON.stringify({ message: "Internal server error" }),
-    };
   }
 };
 
@@ -146,11 +154,15 @@ async function handleJoin(roomId, body, connectId) {
   user.connectID = connectId;
   await updateRoomUser(room, user, userResult.index);
   // 广播更新
-  const payload = {
+  await broadcastMessage(room, {
     action: "userJoined",
     user: user,
-  };
-  await broadcastMessage(room, payload);
+  });
+  room.members.push(JSON.stringify(user));
+  await sendMessage(user, {
+    action: "init",
+    room: room,
+  })
   return { statusCode: 200 };
 }
 
@@ -162,7 +174,7 @@ async function handleJoin(roomId, body, connectId) {
  * @returns {Promise<WebSocketResult>}
  */
 async function handleChangePosition(roomId, body, connectId) {
-  if (body.position === undefined || body.position === null) {
+  if (!body || body.position === undefined || body.position === null) {
     return {
       statusCode: 400,
       error: 'Invalid body'
@@ -211,7 +223,7 @@ async function handleChangePosition(roomId, body, connectId) {
  * @returns {Promise<WebSocketResult>}
  */
 async function handleMessage(roomId, body, connectId) {
-  if (!body.sendto || !body.message) {
+  if (!body || !body.sendto || !body.message) {
     return {
       statusCode: 400,
       error: 'Invalid body'
@@ -236,7 +248,7 @@ async function handleMessage(roomId, body, connectId) {
   }
   const target = targetResult.user;
   // 发送消息
-  sendMessage(target, Object.assign(body, {sender: user.uuid}))
+  await sendMessage(target, Object.assign(body, { sender: user.uuid }))
   return { statusCode: 200 }
 };
 
@@ -246,7 +258,29 @@ async function handleMessage(roomId, body, connectId) {
  * @param {string} connectId 
  * @returns {Promise<WebSocketResult>}
  */
-async function handleDefault(roomId, body, connectId) { };
+async function handleDefault(roomId, body, connectId) {
+  if (!body || !body.sendto || !body.message) {
+    return {
+      statusCode: 400,
+      error: 'Invalid body'
+    }
+  }
+  // 获取房间信息
+  const result = await getRoomById(roomId);
+  if (result.error) {
+    return result.error;
+  }
+  const room = result.Item;
+  // 用connectId查找用户对象
+  const userResult = getUserByID(room, 'connectId', connectId);
+  if (userResult.error) {
+    return userResult.error;
+  }
+  const user = userResult.user;
+  // 业务逻辑判断
+  // 更新数据库laststate
+  // 广播
+};
 
 /**
  * 广播消息到多个用户
@@ -460,7 +494,7 @@ async function getRoomById(roomId) {
     if (!result.Item) {
       result.error = {
         statusCode: 404,
-        error: JSON.stringify({ message: "Room not found" }),
+        error: "Room not found",
       };
     }
   } catch (dbError) {
@@ -468,7 +502,7 @@ async function getRoomById(roomId) {
     console.error("Database error:", dbError);
     result.error = {
       statusCode: 500,
-      error: JSON.stringify({ message: "Internal server error" }),
+      error: "Internal server error",
     };
   }
 
@@ -509,13 +543,13 @@ function getUserByID(room, by, id) {
     } catch (e) {
       result.error = {
         statusCode: 400,
-        error: JSON.stringify({ message: "Invalid user data" }),
+        error: "Invalid user data",
       };
     }
   } else {
     result.error = {
       statusCode: 404,
-      error: JSON.stringify({ message: "User not found" }),
+      error: "User not found",
     };
   }
 
