@@ -39,8 +39,8 @@ async function createRoom(type) {
     members: [],
     lastState: "",
     metadata: {
-      stage: "WAITING",
-      memberLimit: 2, // 默认最大人数为2
+      stage: "LOBBY",
+      posLimit: 2, // 最大人数
     },
     createdAt: Math.floor(Date.now() / 1000), // 当前时间戳（秒）
     ttl: Math.floor(Date.now() / 1000) + 86400 * 7, // 7天后过期

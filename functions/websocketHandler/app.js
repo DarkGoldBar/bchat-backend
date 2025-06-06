@@ -1,4 +1,3 @@
-'use strict'
 /** @typedef {import('../types.js').Room} Room */
 /** @typedef {import('../types.js').User} User */
 /** @typedef {import('../types.js').WebSocketEvent} WebSocketEvent */
@@ -11,6 +10,10 @@ const {
   ApiGatewayManagementApiClient,
   PostToConnectionCommand,
 } = require("@aws-sdk/client-apigatewaymanagementapi");
+
+const MAX_MEMBER = 20;
+const MAX_409_RETRY = 3;
+
 // 创建底层 DynamoDB 客户端
 const ddbClient = new DynamoDBClient({});
 // 创建文档客户端（支持自动转换 JS 对象）
@@ -52,9 +55,11 @@ export const handler = async (event) => {
         return await handleJoin(roomId, body, connectId);
       case "changeposition":
         return await handleChangePosition(roomId, body, connectId);
+      case "message":
+        return await handleMessage(roomId, body, connectId);
       case "$default":
       default:
-        return await handleMessage(event);
+        return await handleDefault(roomId, body, connectId);
     }
   } catch (error) {
     console.error("Connection error:", error);
@@ -197,14 +202,12 @@ async function handleChangePosition(roomId, body, connectId) {
   return { statusCode: 200 };
 }
 
-async function handleMessage(event) {}
+async function handleMessage(event) { }
 
 /**
  * 广播消息到多个用户
- *
  * @param {Room} room - 用户列表
  * @param {Object} payload - 消息 payload
- * @returns {Promise<void>}
  */
 async function broadcast(room, payload) {
   if (!room || !room.members || room.members.length === 0) {
@@ -215,33 +218,91 @@ async function broadcast(room, payload) {
   const users = parseMembers(room.members).filter((u) => u.connectID);
 
   const broadcasts = users.map(async (/** @type {User} */ user) => {
-    try {
-      if (!user.connectID) return;
-
-      await apiGateway.send(
-        new PostToConnectionCommand({
-          ConnectionId: user.connectID,
-          Data: Buffer.from(JSON.stringify(payload)),
-        })
-      );
-    } catch (err) {
-      if (err.statusCode === 410) {
-        // 连接已断开，忽略错误
-        console.log(`Connection ${user.connectID} not found`);
-      } else {
-        throw err;
-      }
-    }
+    sendTo(user, payload)
   });
 
   await Promise.all(broadcasts);
 }
 
-// TODO
-async function createRoomUser(room, user) { }
+/**
+ * 向用户发送消息
+ * @param {User} user 
+ * @param {Object} payload 
+ */
+async function sendTo(user, payload) {
+  try {
+    if (!user.connectID) return;
+
+    await apiGateway.send(
+      new PostToConnectionCommand({
+        ConnectionId: user.connectID,
+        Data: Buffer.from(JSON.stringify(payload)),
+      })
+    );
+  } catch (err) {
+    if (err.statusCode === 410) {
+      // 连接已断开，忽略错误
+      console.log(`Connection ${user.connectID} not found`);
+    } else {
+      throw err;
+    }
+  }
+}
 
 /**
- * 使用乐观锁更新房间中的用户数据
+ * 向房间添加新成员
+ * @param {{Room}} room - 房间对象
+ * @param {{User}} user - 要添加的用户对象
+ * @returns {{Promise<{{statusCode: number, error?: string}}>}}
+ */
+async function createRoomUser(room, user) {
+  try {
+    const userString = JSON.stringify(user);
+
+    const command = new UpdateCommand({
+      TableName: "Room",
+      Key: { id: room.id },
+      UpdateExpression: "SET #members = list_append(if_not_exists(#members, :empty), :newMember), #version = :newVer",
+      ConditionExpression: "size(#members) < :maxSize && #version = :ver",
+      ExpressionAttributeNames: {
+        "#members": "members",
+        "#version": "version"
+      },
+      ExpressionAttributeValues: {
+        ":newMember": [userString],
+        ":empty": [],
+        ":maxSize": MAX_MEMBER, // 设置最大成员数限制
+        ":newVer": (room.version || 0) + 1,
+        ":ver": (room.version || 0)
+      }
+    });
+
+    await dynamo.send(command);
+
+    return { statusCode: 200 };
+  } catch (err) {
+    if (err.name === "ConditionalCheckFailedException") {
+      if (room.members.length > MAX_MEMBER - 3) {
+        return {
+          statusCode: 400,
+          error: "Room is full"
+        };
+      } else {
+        return {
+          statusCode: 409,
+          error: "Version mismatch — concurrent update detected."
+        };
+      }
+    }
+    return {
+      statusCode: 500,
+      error: err.message || "Failed to create room member"
+    };
+  }
+}
+
+/**
+ * 更新房间中的用户数据
  * @param {Room} room - 当前房间对象
  * @param {User} user - 需要更新的用户对象
  * @param {number} index - 用户在 members 数组中的位置
@@ -313,7 +374,7 @@ async function deleteRoomUser(room, user, index) {
     if (err.name === "ConditionalCheckFailedException") {
       return {
         statusCode: 409,
-        error: "Mismatch: user at target index is not as expected",
+        error: "Version mismatch — concurrent update detected.",
       };
     }
     return {
@@ -418,7 +479,7 @@ function getUserByID(room, by, id) {
 }
 
 function parseMembers(userStringArr) {
-  const users = room.members
+  const users = userStringArr.members
     .map((member) => {
       try {
         return JSON.parse(member);

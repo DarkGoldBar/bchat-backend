@@ -41,8 +41,8 @@
  * @property {string} uuid - 用户唯一标识
  * @property {string} name - 用户名
  * @property {string} avatar - 用户头像
- * @property {string} [connectID] - 连接ID
- * @property {number} [position] - 房间中的位置
+ * @property {string} [connectID] - 连接ID。
+ * @property {number} [position] - 房间中的位置。0为观众位，观众位可以重复，其他位置不可重复。不能大于房间的最大位置。
  */
 
 /**
@@ -51,16 +51,16 @@
  * @property {string} type - 房间类型
  * @property {string[]} members - 房间成员对象的json字符串数组。
  * @property {string} lastState - 最后状态
- * @property {Object} metadata - 元数据
+ * @property {RoomMeta} metadata - 元数据
  * @property {number} createdAt - 创建时间
  * @property {number} ttl - 生存时间
  * @property {number} version - 乐观锁版本
  */
 
 /**
- * @typedef {Object} metadata
- * @property {'WAITING' | 'INGAME' | 'END'} stage - 状态
- * @property {number} memberLimit - 最大人数
+ * @typedef {Object} RoomMeta
+ * @property {'LOBBY' | 'INGAME' | 'GAMEOVER'} stage - 状态
+ * @property {number} posLimit - 最大位置号
  */
 
 export {};
