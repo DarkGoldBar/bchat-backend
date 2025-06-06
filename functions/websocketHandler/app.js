@@ -1,6 +1,8 @@
+'use strict'
 /** @typedef {import('../types.js').Room} Room */
 /** @typedef {import('../types.js').User} User */
 /** @typedef {import('../types.js').WebSocketEvent} WebSocketEvent */
+/** @typedef {import('../types.js').WebSocketResult} WebSocketResult */
 
 const { GetCommand, UpdateCommand } = require("@aws-sdk/lib-dynamodb");
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
@@ -23,7 +25,7 @@ const ROOM_TABLE = process.env.ROOM_TABLE;
 
 /**
  * @param {WebSocketEvent} event - API Gateway
- * @returns {Promise<Object>} - API Gateway
+ * @returns {Promise<WebSocketResult>} - API Gateway
  */
 export const handler = async (event) => {
   const route = event.requestContext.routeKey;
@@ -80,7 +82,7 @@ async function handleDisconnect(roomId, connectId) {
   }
   const room = result.Item;
   // 用connectId查找用户对象
-  const userResult = getUserByconnectID(room, connectId);
+  const userResult = getUserByID(room, 'connectId', connectId);
   if (userResult.error) {
     return userResult.error;
   }
@@ -101,16 +103,98 @@ async function handleDisconnect(roomId, connectId) {
   return { statusCode: 200 };
 }
 
+/**
+ * @param {string} roomId 
+ * @param {object} body 
+ * @param {User} body.user
+ * @param {string} connectId 
+ * @returns {Promise<WebSocketResult>}
+ */
 async function handleJoin(roomId, body, connectId) {
+  if (!body.user || !body.user.uuid || !body.user.name || !body.user.avatar) {
+    return {
+      statusCode: 400,
+      error: 'Invalid body'
+    }
+  }
   // 获取房间信息
-  // 更新用户的 connectID
-  // 将用户添加到房间成员列表
-  // 更新房间的 members
+  const result = await getRoomById(roomId);
+  if (result.error) {
+    return result.error;
+  }
+  const room = result.Item;
+  // 用uuid查找用户对象
+  const userResult = getUserByID(room, 'uuid', body.user.uuid);
+  if (userResult.error) {
+    if (userResult.error.statusCode === 404) {
+      // 如果用户不存在向数据库的members添加这个user
+      const user = body.user;
+      user.connectID = connectId;
+      user.position = 0;
+      await createRoomUser(room, user);
+    } else {
+      return userResult.error;
+    }
+  }
+  // 如果用户存在则更新connectId，然后向数据库的members更新这个user
+  const user = userResult.user;
+  user.connectID = connectId;
+  await updateRoomUser(room, user, userResult.index);
   // 广播更新
+  const payload = {
+    action: "userJoined",
+    user: user,
+  };
+  await broadcast(room, payload);
+  return { statusCode: 200 };
 }
 
+/**
+ * @param {string} roomId 
+ * @param {object} body 
+ * @param {number} body.position
+ * @param {string} connectId 
+ * @returns {Promise<WebSocketResult>}
+ */
 async function handleChangePosition(roomId, body, connectId) {
+  if (body.position === undefined || body.position === null) {
+    return {
+      statusCode: 400,
+      error: 'Invalid body'
+    }
+  }
   // 获取房间信息
+  const result = await getRoomById(roomId);
+  if (result.error) {
+    return result.error;
+  }
+  const room = result.Item;
+  // 用connectId查找用户对象
+  const userResult = getUserByID(room, 'connectId', connectId);
+  if (userResult.error) {
+    return userResult.error;
+  }
+  const user = userResult.user;
+  // 获取其他用户的位置, 如重复且非0则报错
+  if (body.position !== 0) {
+    const users = parseMembers(room.members).filter(u => u.uuid !== user.uuid);
+    if (users.some(u => u.position === body.position)) {
+      return {
+        statusCode: 400,
+        error: 'Invalid parameter'
+      }
+    }
+  }
+  // 更新用户
+  user.position = body.position;
+  await updateRoomUser(room, user, userResult.index);
+  // 广播更新
+  const payload = {
+    action: "userChangedPosition",
+    user: user,
+  };
+  await broadcast(room, payload);
+  return { statusCode: 200 };
 }
 
 async function handleMessage(event) {}
@@ -128,15 +212,7 @@ async function broadcast(room, payload) {
     return;
   }
   // 获取房间成员列表
-  const users = room.members
-    .map((member) => {
-      try {
-        return JSON.parse(member);
-      } catch (e) {
-        return null;
-      }
-    })
-    .filter((user) => user && user.connectID);
+  const users = parseMembers(room.members).filter((u) => u.connectID);
 
   const broadcasts = users.map(async (/** @type {User} */ user) => {
     try {
@@ -161,6 +237,9 @@ async function broadcast(room, payload) {
   await Promise.all(broadcasts);
 }
 
+// TODO
+async function createRoomUser(room, user) { }
+
 /**
  * 使用乐观锁更新房间中的用户数据
  * @param {Room} room - 当前房间对象
@@ -168,7 +247,7 @@ async function broadcast(room, payload) {
  * @param {number} index - 用户在 members 数组中的位置
  * @returns {Promise<{statusCode: number, error?: string}>}
  */
-export async function updateRoomUser(room, user, index) {
+async function updateRoomUser(room, user, index) {
   try {
     const result = await ddbClient.send(
       new UpdateCommand({
@@ -246,8 +325,8 @@ async function deleteRoomUser(room, user, index) {
 
 /**
  * @typedef {Object} getRoomResult
- * @property {Room?} Item - 房间对象
- * @property {Object?} error - 错误信息
+ * @property {Room} Item - 房间对象
+ * @property {Object} [error] - 错误信息
  * @property {number} error.statusCode - HTTP 状态码
  * @property {string} error.body - 错误消息
  */
@@ -293,9 +372,9 @@ async function getRoomById(roomId) {
 
 /**
  * @typedef {Object} getUserResult
- * @property {User?} user - 用户对象
- * @property {number?} index - 用户的索引位置
- * @property {Object?} error - 错误信息
+ * @property {User} user - 用户对象
+ * @property {number} index - 用户的索引位置
+ * @property {Object} [error] - 错误信息
  * @property {number} error.statusCode - HTTP 状态码
  * @property {string} error.body - 错误消息
  */
@@ -304,16 +383,17 @@ async function getRoomById(roomId) {
  * 根据连接 ID 获取用户
  *
  * @param {Room} room - 房间信息
- * @param {string} connectId - 连接 ID
+ * @param {'connectId' | 'uuid'} by - ID类型
+ * @param {string} id - 连接 ID
  * @returns {getUserResult}
  */
-function getUserByconnectID(room, connectId) {
+function getUserByID(room, by, id) {
   /** @type {getUserResult} */
   const result = {};
 
   /** @type {string} */
   let userString = null;
-  const query = `"connectID":"${connectId}"`;
+  const query = `"${by}":"${id}"`;
   if (room && room.members) {
     userString = room.members.find((s) => s.includes(query));
     result.index = room.members.indexOf(userString);
@@ -335,4 +415,17 @@ function getUserByconnectID(room, connectId) {
   }
 
   return result;
+}
+
+function parseMembers(userStringArr) {
+  const users = room.members
+    .map((member) => {
+      try {
+        return JSON.parse(member);
+      } catch (e) {
+        return null;
+      }
+    })
+    .filter((u) => u);
+  return users
 }

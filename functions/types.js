@@ -29,6 +29,14 @@
  */
 
 /**
+ * AWS Lambda WebSocket 返回对象
+ * @typedef {Object} WebSocketResult
+ * @property {number} statusCode - 返回值
+ * @property {string} [body]
+ * @property {string} [error]
+ */
+
+/**
  * @typedef {Object} User
  * @property {string} uuid - 用户唯一标识
  * @property {string} name - 用户名
