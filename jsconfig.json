@@ -1,8 +1,0 @@
-{
-    "compilerOptions": {
-      "checkJs": true,
-      "baseUrl": "."
-    },
-    "include": ["functions/**/*.js", "functions/**/*.d.ts"]
-  }
-  

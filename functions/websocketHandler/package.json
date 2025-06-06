@@ -1,6 +1,5 @@
 {
   "name": "websocket-handler",
-  "type": "module",
   "version": "1.0.0",
   "description": "websocket on API Gateway",
   "main": "src/app.js",
