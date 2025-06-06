@@ -41,7 +41,7 @@ export const handler = async (event) => {
   if (!roomId) {
     return {
       statusCode: 400,
-      body: JSON.stringify({ message: "Room ID is required" }),
+      error: JSON.stringify({ message: "Room ID is required" }),
     };
   }
 
@@ -65,7 +65,7 @@ export const handler = async (event) => {
     console.error("Connection error:", error);
     return {
       statusCode: 500,
-      body: JSON.stringify({ message: "Internal server error" }),
+      error: JSON.stringify({ message: "Internal server error" }),
     };
   }
 };
@@ -104,7 +104,7 @@ async function handleDisconnect(roomId, connectId) {
     action: "userDisconnected",
     user: user,
   };
-  await broadcast(room, payload);
+  await broadcastMessage(room, payload);
   return { statusCode: 200 };
 }
 
@@ -150,7 +150,7 @@ async function handleJoin(roomId, body, connectId) {
     action: "userJoined",
     user: user,
   };
-  await broadcast(room, payload);
+  await broadcastMessage(room, payload);
   return { statusCode: 200 };
 }
 
@@ -198,18 +198,62 @@ async function handleChangePosition(roomId, body, connectId) {
     action: "userChangedPosition",
     user: user,
   };
-  await broadcast(room, payload);
+  await broadcastMessage(room, payload);
   return { statusCode: 200 };
 }
 
-async function handleMessage(event) { }
+/**
+ * @param {string} roomId 
+ * @param {object} body 
+ * @param {string} body.sendto
+ * @param {string} body.message
+ * @param {string} connectId 
+ * @returns {Promise<WebSocketResult>}
+ */
+async function handleMessage(roomId, body, connectId) {
+  if (!body.sendto || !body.message) {
+    return {
+      statusCode: 400,
+      error: 'Invalid body'
+    }
+  }
+  // 获取房间信息
+  const result = await getRoomById(roomId);
+  if (result.error) {
+    return result.error;
+  }
+  const room = result.Item;
+  // 用connectId查找用户对象
+  const userResult = getUserByID(room, 'connectId', connectId);
+  if (userResult.error) {
+    return userResult.error;
+  }
+  const user = userResult.user;
+  // 用uuid查找用户对象
+  const targetResult = getUserByID(room, 'uuid', body.sendto);
+  if (targetResult.error) {
+    return targetResult.error;
+  }
+  const target = targetResult.user;
+  // 发送消息
+  sendMessage(target, Object.assign(body, {sender: user.uuid}))
+  return { statusCode: 200 }
+};
+
+/**
+ * @param {string} roomId 
+ * @param {object} body 
+ * @param {string} connectId 
+ * @returns {Promise<WebSocketResult>}
+ */
+async function handleDefault(roomId, body, connectId) { };
 
 /**
  * 广播消息到多个用户
  * @param {Room} room - 用户列表
  * @param {Object} payload - 消息 payload
  */
-async function broadcast(room, payload) {
+async function broadcastMessage(room, payload) {
   if (!room || !room.members || room.members.length === 0) {
     console.warn("No members in the room to broadcast to.");
     return;
@@ -218,7 +262,7 @@ async function broadcast(room, payload) {
   const users = parseMembers(room.members).filter((u) => u.connectID);
 
   const broadcasts = users.map(async (/** @type {User} */ user) => {
-    sendTo(user, payload)
+    sendMessage(user, payload)
   });
 
   await Promise.all(broadcasts);
@@ -229,7 +273,7 @@ async function broadcast(room, payload) {
  * @param {User} user 
  * @param {Object} payload 
  */
-async function sendTo(user, payload) {
+async function sendMessage(user, payload) {
   try {
     if (!user.connectID) return;
 
@@ -253,7 +297,7 @@ async function sendTo(user, payload) {
  * 向房间添加新成员
  * @param {{Room}} room - 房间对象
  * @param {{User}} user - 要添加的用户对象
- * @returns {{Promise<{{statusCode: number, error?: string}}>}}
+ * @returns {{Promise<{WebSocketResult}>}}
  */
 async function createRoomUser(room, user) {
   try {
@@ -389,7 +433,7 @@ async function deleteRoomUser(room, user, index) {
  * @property {Room} Item - 房间对象
  * @property {Object} [error] - 错误信息
  * @property {number} error.statusCode - HTTP 状态码
- * @property {string} error.body - 错误消息
+ * @property {string} error.error - 错误消息
  */
 
 /**
@@ -416,7 +460,7 @@ async function getRoomById(roomId) {
     if (!result.Item) {
       result.error = {
         statusCode: 404,
-        body: JSON.stringify({ message: "Room not found" }),
+        error: JSON.stringify({ message: "Room not found" }),
       };
     }
   } catch (dbError) {
@@ -424,7 +468,7 @@ async function getRoomById(roomId) {
     console.error("Database error:", dbError);
     result.error = {
       statusCode: 500,
-      body: JSON.stringify({ message: "Internal server error" }),
+      error: JSON.stringify({ message: "Internal server error" }),
     };
   }
 
@@ -437,7 +481,7 @@ async function getRoomById(roomId) {
  * @property {number} index - 用户的索引位置
  * @property {Object} [error] - 错误信息
  * @property {number} error.statusCode - HTTP 状态码
- * @property {string} error.body - 错误消息
+ * @property {string} error.error - 错误消息
  */
 
 /**
@@ -465,13 +509,13 @@ function getUserByID(room, by, id) {
     } catch (e) {
       result.error = {
         statusCode: 400,
-        body: JSON.stringify({ message: "Invalid user data" }),
+        error: JSON.stringify({ message: "Invalid user data" }),
       };
     }
   } else {
     result.error = {
       statusCode: 404,
-      body: JSON.stringify({ message: "User not found" }),
+      error: JSON.stringify({ message: "User not found" }),
     };
   }
 
