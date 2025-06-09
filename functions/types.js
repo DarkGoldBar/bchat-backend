@@ -56,10 +56,38 @@
  * @property {number} version - 乐观锁版本
  */
 
+
 /**
  * @typedef {Object} RoomMeta
  * @property {'LOBBY' | 'INGAME' | 'GAMEOVER'} stage - 状态
  * @property {number} posLimit - 最大位置号
+ */
+
+/**
+ * @interface BaseBoard
+ */
+
+/**
+ * @name BaseBoard#memberLimit
+ * @type {Array<number>}
+ * @static
+ */
+
+/**
+ * @name BaseBoard#last
+ * @type {object}
+ */
+
+/**
+ * @function
+ * @name BaseBoard#new
+ * @returns {WebSocketResult}
+ */
+
+/**
+ * @function
+ * @name BaseBoard#move
+ * @returns {WebSocketResult}
  */
 
 export {};
