@@ -46,7 +46,7 @@ export const handler = async (event) => {
   }
 
   /** @type {WebSocketResult} */
-  let result = { statusCode: 500 }
+  let result = { statusCode: 500 };
   for (let trials = 0; trials < MAX_409_RETRY; trials++) {
     result = await router();
     if (result.statusCode !== 409) {
@@ -56,7 +56,7 @@ export const handler = async (event) => {
   return result;
 
   /**
-   * 
+   *
    * @returns {Promise<WebSocketResult>}
    */
   async function router() {
@@ -95,7 +95,7 @@ async function handleDisconnect(roomId, connectId) {
   }
   const room = result.Item;
   // 用connectId查找用户对象
-  const userResult = getUserByID(room, 'connectId', connectId);
+  const userResult = getUserByID(room, "connectId", connectId);
   if (userResult.error) {
     return userResult.error;
   }
@@ -117,18 +117,18 @@ async function handleDisconnect(roomId, connectId) {
 }
 
 /**
- * @param {string} roomId 
- * @param {object} body 
+ * @param {string} roomId
+ * @param {object} body
  * @param {User} body.user
- * @param {string} connectId 
+ * @param {string} connectId
  * @returns {Promise<WebSocketResult>}
  */
 async function handleJoin(roomId, body, connectId) {
   if (!body.user || !body.user.uuid || !body.user.name || !body.user.avatar) {
     return {
       statusCode: 400,
-      error: 'Invalid body'
-    }
+      error: "Invalid body",
+    };
   }
   // 获取房间信息
   const result = await getRoomById(roomId);
@@ -137,7 +137,7 @@ async function handleJoin(roomId, body, connectId) {
   }
   const room = result.Item;
   // 用uuid查找用户对象
-  const userResult = getUserByID(room, 'uuid', body.user.uuid);
+  const userResult = getUserByID(room, "uuid", body.user.uuid);
   if (userResult.error) {
     if (userResult.error.statusCode === 404) {
       // 如果用户不存在向数据库的members添加这个user
@@ -162,23 +162,23 @@ async function handleJoin(roomId, body, connectId) {
   await sendMessage(user, {
     action: "init",
     room: room,
-  })
+  });
   return { statusCode: 200 };
 }
 
 /**
- * @param {string} roomId 
- * @param {object} body 
+ * @param {string} roomId
+ * @param {object} body
  * @param {number} body.position
- * @param {string} connectId 
+ * @param {string} connectId
  * @returns {Promise<WebSocketResult>}
  */
 async function handleChangePosition(roomId, body, connectId) {
   if (!body || body.position === undefined || body.position === null) {
     return {
       statusCode: 400,
-      error: 'Invalid body'
-    }
+      error: "Invalid body",
+    };
   }
   // 获取房间信息
   const result = await getRoomById(roomId);
@@ -187,19 +187,21 @@ async function handleChangePosition(roomId, body, connectId) {
   }
   const room = result.Item;
   // 用connectId查找用户对象
-  const userResult = getUserByID(room, 'connectId', connectId);
+  const userResult = getUserByID(room, "connectId", connectId);
   if (userResult.error) {
     return userResult.error;
   }
   const user = userResult.user;
   // 获取其他用户的位置, 如重复且非0则报错
   if (body.position !== 0) {
-    const users = parseMembers(room.members).filter(u => u.uuid !== user.uuid);
-    if (users.some(u => u.position === body.position)) {
+    const users = parseMembers(room.members).filter(
+      (u) => u.uuid !== user.uuid
+    );
+    if (users.some((u) => u.position === body.position)) {
       return {
         statusCode: 400,
-        error: 'Invalid parameter'
-      }
+        error: "Invalid parameter",
+      };
     }
   }
   // 更新用户
@@ -215,19 +217,19 @@ async function handleChangePosition(roomId, body, connectId) {
 }
 
 /**
- * @param {string} roomId 
- * @param {object} body 
+ * @param {string} roomId
+ * @param {object} body
  * @param {string} body.sendto
  * @param {string} body.message
- * @param {string} connectId 
+ * @param {string} connectId
  * @returns {Promise<WebSocketResult>}
  */
 async function handleMessage(roomId, body, connectId) {
   if (!body || !body.sendto || !body.message) {
     return {
       statusCode: 400,
-      error: 'Invalid body'
-    }
+      error: "Invalid body",
+    };
   }
   // 获取房间信息
   const result = await getRoomById(roomId);
@@ -236,34 +238,34 @@ async function handleMessage(roomId, body, connectId) {
   }
   const room = result.Item;
   // 用connectId查找用户对象
-  const userResult = getUserByID(room, 'connectId', connectId);
+  const userResult = getUserByID(room, "connectId", connectId);
   if (userResult.error) {
     return userResult.error;
   }
   const user = userResult.user;
   // 用uuid查找用户对象
-  const targetResult = getUserByID(room, 'uuid', body.sendto);
+  const targetResult = getUserByID(room, "uuid", body.sendto);
   if (targetResult.error) {
     return targetResult.error;
   }
   const target = targetResult.user;
   // 发送消息
-  await sendMessage(target, Object.assign(body, { sender: user.uuid }))
-  return { statusCode: 200 }
-};
+  await sendMessage(target, Object.assign(body, { sender: user.uuid }));
+  return { statusCode: 200 };
+}
 
 /**
- * @param {string} roomId 
- * @param {object} body 
- * @param {string} connectId 
+ * @param {string} roomId
+ * @param {object} body
+ * @param {string} connectId
  * @returns {Promise<WebSocketResult>}
  */
 async function handleDefault(roomId, body, connectId) {
   if (!body || !body.sendto || !body.message) {
     return {
       statusCode: 400,
-      error: 'Invalid body'
-    }
+      error: "Invalid body",
+    };
   }
   // 获取房间信息
   const result = await getRoomById(roomId);
@@ -272,7 +274,7 @@ async function handleDefault(roomId, body, connectId) {
   }
   const room = result.Item;
   // 用connectId查找用户对象
-  const userResult = getUserByID(room, 'connectId', connectId);
+  const userResult = getUserByID(room, "connectId", connectId);
   if (userResult.error) {
     return userResult.error;
   }
@@ -280,7 +282,7 @@ async function handleDefault(roomId, body, connectId) {
   // 业务逻辑判断
   // 更新数据库laststate
   // 广播
-};
+}
 
 /**
  * 广播消息到多个用户
@@ -296,7 +298,7 @@ async function broadcastMessage(room, payload) {
   const users = parseMembers(room.members).filter((u) => u.connectID);
 
   const broadcasts = users.map(async (/** @type {User} */ user) => {
-    sendMessage(user, payload)
+    sendMessage(user, payload);
   });
 
   await Promise.all(broadcasts);
@@ -304,8 +306,8 @@ async function broadcastMessage(room, payload) {
 
 /**
  * 向用户发送消息
- * @param {User} user 
- * @param {Object} payload 
+ * @param {User} user
+ * @param {Object} payload
  */
 async function sendMessage(user, payload) {
   try {
@@ -340,19 +342,20 @@ async function createRoomUser(room, user) {
     const command = new UpdateCommand({
       TableName: "Room",
       Key: { id: room.id },
-      UpdateExpression: "SET #members = list_append(if_not_exists(#members, :empty), :newMember), #version = :newVer",
+      UpdateExpression:
+        "SET #members = list_append(if_not_exists(#members, :empty), :newMember), #version = :newVer",
       ConditionExpression: "size(#members) < :maxSize && #version = :ver",
       ExpressionAttributeNames: {
         "#members": "members",
-        "#version": "version"
+        "#version": "version",
       },
       ExpressionAttributeValues: {
         ":newMember": [userString],
         ":empty": [],
         ":maxSize": MAX_MEMBER, // 设置最大成员数限制
         ":newVer": (room.version || 0) + 1,
-        ":ver": (room.version || 0)
-      }
+        ":ver": room.version || 0,
+      },
     });
 
     await dynamo.send(command);
@@ -363,18 +366,18 @@ async function createRoomUser(room, user) {
       if (room.members.length > MAX_MEMBER - 3) {
         return {
           statusCode: 400,
-          error: "Room is full"
+          error: "Room is full",
         };
       } else {
         return {
           statusCode: 409,
-          error: "Version mismatch — concurrent update detected."
+          error: "Version mismatch — concurrent update detected.",
         };
       }
     }
     return {
       statusCode: 500,
-      error: err.message || "Failed to create room member"
+      error: err.message || "Failed to create room member",
     };
   }
 }
@@ -566,5 +569,5 @@ function parseMembers(userStringArr) {
       }
     })
     .filter((u) => u);
-  return users
+  return users;
 }

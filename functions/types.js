@@ -56,7 +56,6 @@
  * @property {number} version - 乐观锁版本
  */
 
-
 /**
  * @typedef {Object} RoomMeta
  * @property {'LOBBY' | 'INGAME' | 'GAMEOVER'} stage - 状态
@@ -64,30 +63,12 @@
  */
 
 /**
- * @interface BaseBoard
- */
-
-/**
- * @name BaseBoard#memberLimit
- * @type {Array<number>}
- * @static
- */
-
-/**
- * @name BaseBoard#last
- * @type {object}
- */
-
-/**
- * @function
- * @name BaseBoard#new
- * @returns {WebSocketResult}
- */
-
-/**
- * @function
- * @name BaseBoard#move
- * @returns {WebSocketResult}
+ * @typedef {Object} BaseBoard
+ * @property {number[]} memberLimitList - 支持的成员数量限制（通常为玩家人数）
+ * @property {Object} meta - 存储静态规则
+ * @property {Object} last - 存储最后的游戏状态或动作
+ * @property {function(): BaseBoard} new - 创建一个新的游戏棋盘实例
+ * @property {function(): WebSocketResult} move - 移动处理函数，返回 WebSocket 结果
  */
 
 export {};
