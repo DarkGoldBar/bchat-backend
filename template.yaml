@@ -11,11 +11,43 @@ Globals:
     MemorySize: 256
     Architectures:
       - x86_64
-    Environment:
-      Variables:
-        ROOMS_TABLE: RoomsTable
 
 Resources:
+  SharedFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: TableAndWebSocketAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                Resource:
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${RoomsTable}
+              - Effect: Allow
+                Action:
+                  - execute-api:ManageConnections
+                Resource:
+                  - !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${BChatWebSocketApi}/*/@connections/*
+
   ##############################
   # WebSocket API
   ##############################
@@ -32,14 +64,7 @@ Resources:
       CodeUri: functions/websocketHandler/
       Handler: app.handler
       Timeout: 10
-      Policies:
-        - AWSLambdaBasicExecutionRole
-        - AmazonDynamoDBFullAccess
-        - Statement:
-            - Effect: Allow
-              Action:
-                - execute-api:ManageConnections
-              Resource: "*"
+      Role: !GetAtt SharedFunctionRole.Arn
 
   WebSocketIntegration:
     Type: AWS::ApiGatewayV2::Integration
@@ -87,14 +112,6 @@ Resources:
       DeploymentId: !Ref WebSocketDeployment
       ApiId: !Ref BChatWebSocketApi
 
-  WebSocketInvokePermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      FunctionName: !Ref WebSocketHandlerFunction
-      Action: lambda:InvokeFunction
-      Principal: apigateway.amazonaws.com
-      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${BChatWebSocketApi}/*
-
   ##############################
   # HTTP REST API Functions
   ##############################
@@ -112,6 +129,7 @@ Resources:
     Properties:
       CodeUri: functions/roomHandler/
       Handler: app.handler
+      Role: !GetAtt SharedFunctionRole.Arn
       Events:
         Room:
           Type: Api
