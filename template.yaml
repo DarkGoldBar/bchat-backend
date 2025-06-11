@@ -11,6 +11,9 @@ Globals:
     MemorySize: 256
     Architectures:
       - x86_64
+  Environment:
+    Variables:
+      ROOMS_TABLE: RoomsTable
 
 Resources:
   SharedFunctionRole:
