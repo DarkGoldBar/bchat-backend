@@ -11,9 +11,9 @@ Globals:
     MemorySize: 256
     Architectures:
       - x86_64
-  Environment:
-    Variables:
-      ROOMS_TABLE: RoomsTable
+    Environment:
+      Variables:
+        ROOMS_TABLE: RoomsTable
 
 Resources:
   SharedFunctionRole:
@@ -123,9 +123,9 @@ Resources:
     Properties:
       StageName: Prod
       Cors:
-        AllowMethods: "'OPTIONS,POST,GET'"
-        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
-        AllowOrigin: "'*'"
+        AllowMethods: 'OPTIONS,POST,GET'
+        AllowHeaders: 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'
+        AllowOrigin: '*'
 
   RoomHandlerFunction:
     Type: AWS::Serverless::Function
@@ -141,7 +141,7 @@ Resources:
             Path: /room
             Method: POST
             Auth:
-              ApiKeyRequired: true
+              # ApiKeyRequired: true
 
   ##############################
   # DynamoDB Tables
