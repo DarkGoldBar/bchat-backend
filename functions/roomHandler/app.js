@@ -14,7 +14,7 @@ const ROOMS_TABLE = process.env.ROOMS_TABLE;
 const maxRetries = 3;
 const roomIdLength = 4;
 
-export const handler = async (event) => {
+module.exports.handler = async (event) => {
   const queryParams = event.queryStringParameters || {};
 
   const { type } = queryParams;

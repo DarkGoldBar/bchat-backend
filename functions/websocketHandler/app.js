@@ -30,7 +30,7 @@ const ROOM_TABLE = process.env.ROOM_TABLE;
  * @param {WebSocketEvent} event - API Gateway
  * @returns {Promise<WebSocketResult>} - API Gateway
  */
-export const handler = async (event) => {
+module.exports.handler = async (event) => {
   const route = event.requestContext.routeKey;
   const queryParams = event.queryStringParameters || {};
 
