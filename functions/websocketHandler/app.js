@@ -29,7 +29,7 @@ module.exports.handler = async (event) => {
 
   const roomId = queryParams.room;
   const body = event.body ? JSON.parse(event.body) : {};
-  const subAction = event.body.subAction;
+  const subAction = body.subAction;
   const connectId = event.requestContext.connectID;
 
   console.log(`READ route=${route};roomId=${roomId};connectId=${connectId};body=${event.body}`)
