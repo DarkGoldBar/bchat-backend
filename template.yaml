@@ -69,6 +69,15 @@ Resources:
       Timeout: 10
       Role: !GetAtt SharedFunctionRole.Arn
 
+  WebSocketPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - BChatWebSocketApi
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref WebSocketHandlerFunction
+      Principal: apigateway.amazonaws.com
+
   WebSocketIntegration:
     Type: AWS::ApiGatewayV2::Integration
     Properties:
@@ -98,12 +107,28 @@ Resources:
       RouteKey: $default
       Target: !Join ["/", ["integrations", !Ref WebSocketIntegration]]
 
+  LobbyRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref BChatWebSocketApi
+      RouteKey: lobby
+      Target: !Join ["/", ["integrations", !Ref WebSocketIntegration]]
+
+  WuziqiRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref BChatWebSocketApi
+      RouteKey: wuziqi
+      Target: !Join ["/", ["integrations", !Ref WebSocketIntegration]]
+
   WebSocketDeployment:
     Type: AWS::ApiGatewayV2::Deployment
     DependsOn:
       - ConnectRoute
       - DisconnectRoute
       - DefaultRoute
+      - LobbyRoute
+      - WuziqiRoute
     Properties:
       ApiId: !Ref BChatWebSocketApi
 

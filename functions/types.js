@@ -32,7 +32,7 @@
  * AWS Lambda WebSocket 返回对象
  * @typedef {Object} WebSocketResult
  * @property {number} statusCode - 返回值
- * @property {string} [error]
+ * @property {string} [body]
  */
 
 /**

@@ -3,28 +3,21 @@
 /** @typedef {import('../types.js').WebSocketEvent} WebSocketEvent */
 /** @typedef {import('../types.js').WebSocketResult} WebSocketResult */
 
-const { GetCommand, UpdateCommand } = require("@aws-sdk/lib-dynamodb");
+const { GetCommand, UpdateCommand, DynamoDBDocumentClient } = require("@aws-sdk/lib-dynamodb");
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
-const { DynamoDBDocumentClient } = require("@aws-sdk/lib-dynamodb");
 const {
   ApiGatewayManagementApiClient,
   PostToConnectionCommand,
 } = require("@aws-sdk/client-apigatewaymanagementapi");
 
+/** @type {string} */
+const ROOMS_TABLE = process.env.ROOMS_TABLE;
 const MAX_MEMBER = 20;
 const MAX_409_RETRY = 3;
 
-// 创建底层 DynamoDB 客户端
 const ddbClient = new DynamoDBClient({});
-// 创建文档客户端（支持自动转换 JS 对象）
 const dynamo = DynamoDBDocumentClient.from(ddbClient);
-// 创建 API Gateway Management API 客户端
-const apiGateway = new ApiGatewayManagementApiClient({
-  endpoint: process.env.WEBSOCKET_ENDPOINT,
-});
-// 获取环境变量中的房间表名
-/** @type {string} */
-const ROOMS_TABLE = process.env.ROOMS_TABLE;
+const apiGateway = new ApiGatewayManagementApiClient({});
 
 /**
  * @param {WebSocketEvent} event - API Gateway
@@ -36,12 +29,15 @@ module.exports.handler = async (event) => {
 
   const roomId = queryParams.room;
   const body = event.body ? JSON.parse(event.body) : {};
-  const connectId = event["requestContext"]["connectID"];
+  const subAction = event.body.subAction;
+  const connectId = event.requestContext.connectID;
+
+  console.log(`READ route=${route};roomId=${roomId};connectId=${connectId};body=${event.body}`)
 
   if (!roomId) {
     return {
       statusCode: 400,
-      error: "Room ID is required",
+      body: "Room ID is required",
     };
   }
 
@@ -49,14 +45,12 @@ module.exports.handler = async (event) => {
   let result = { statusCode: 500 };
   for (let trials = 0; trials < MAX_409_RETRY; trials++) {
     result = await router();
-    if (result.statusCode !== 409) {
-      return result;
-    }
+    console.log("WRITE", JSON.stringify(result))
+    if (result.statusCode !== 409) break;
   }
   return result;
 
   /**
-   *
    * @returns {Promise<WebSocketResult>}
    */
   async function router() {
@@ -65,15 +59,23 @@ module.exports.handler = async (event) => {
         return await handleConnect(roomId);
       case "$disconnect":
         return await handleDisconnect(roomId, connectId);
-      case "join":
-        return await handleJoin(roomId, body, connectId);
-      case "changeposition":
-        return await handleChangePosition(roomId, body, connectId);
-      case "message":
-        return await handleMessage(roomId, body, connectId);
+      case "lobby":
+        switch (subAction) {
+          case "join":
+            return await handleJoin(roomId, body, connectId);
+          case "changeposition":
+            return await handleChangePosition(roomId, body, connectId);
+          case "message":
+            return await handleMessage(roomId, body, connectId);
+        }
+      case "wuziqi":
+        return await handleWuziqi(roomId, body, connectId);
       case "$default":
       default:
-        return await handleDefault(roomId, body, connectId);
+        return {
+          statusCode: 400,
+          body: "Invalid action",
+        };
     }
   }
 };
@@ -81,24 +83,18 @@ module.exports.handler = async (event) => {
 async function handleConnect(roomId) {
   // 查询数据库中是否存在该房间
   const result = await getRoomById(roomId);
-  if (result.error) {
-    return result.error;
-  }
+  if (result.error) return result.error;
   return { statusCode: 200 };
 }
 
 async function handleDisconnect(roomId, connectId) {
   // 获取房间信息
   const result = await getRoomById(roomId);
-  if (result.error) {
-    return result.error;
-  }
+  if (result.error) return result.error;
   const room = result.Item;
   // 用connectId查找用户对象
   const userResult = getUserByID(room, "connectId", connectId);
-  if (userResult.error) {
-    return userResult.error;
-  }
+  if (userResult.error) return userResult.error;
   const user = userResult.user;
   // 根据用户的position更新用户的 connectID 或者删掉用户
   if (user.position) {
@@ -127,7 +123,7 @@ async function handleJoin(roomId, body, connectId) {
   if (!body.user || !body.user.uuid || !body.user.name || !body.user.avatar) {
     return {
       statusCode: 400,
-      error: "Invalid body",
+      body: "Invalid body",
     };
   }
   // 获取房间信息
@@ -144,7 +140,7 @@ async function handleJoin(roomId, body, connectId) {
       const user = body.user;
       user.connectID = connectId;
       user.position = 0;
-      await createRoomUser(room, user);
+      createRoomUser(room, user);
     } else {
       return userResult.error;
     }
@@ -177,7 +173,7 @@ async function handleChangePosition(roomId, body, connectId) {
   if (!body || body.position === undefined || body.position === null) {
     return {
       statusCode: 400,
-      error: "Invalid body",
+      body: "Invalid body",
     };
   }
   // 获取房间信息
@@ -200,7 +196,7 @@ async function handleChangePosition(roomId, body, connectId) {
     if (users.some((u) => u.position === body.position)) {
       return {
         statusCode: 400,
-        error: "Invalid parameter",
+        body: "Invalid parameter",
       };
     }
   }
@@ -228,7 +224,7 @@ async function handleMessage(roomId, body, connectId) {
   if (!body || !body.sendto || !body.message) {
     return {
       statusCode: 400,
-      error: "Invalid body",
+      body: "Invalid body",
     };
   }
   // 获取房间信息
@@ -254,17 +250,11 @@ async function handleMessage(roomId, body, connectId) {
   return { statusCode: 200 };
 }
 
-/**
- * @param {string} roomId
- * @param {object} body
- * @param {string} connectId
- * @returns {Promise<WebSocketResult>}
- */
-async function handleDefault(roomId, body, connectId) {
-  if (!body || !body.sendto || !body.message) {
+async function handleWuziqi(roomId, body, connectId) {
+  if (!body) {
     return {
       statusCode: 400,
-      error: "Invalid body",
+      body: "Invalid body",
     };
   }
   // 获取房间信息
@@ -279,9 +269,11 @@ async function handleDefault(roomId, body, connectId) {
     return userResult.error;
   }
   const user = userResult.user;
-  // 业务逻辑判断
-  // 更新数据库laststate
-  // 广播
+  // 执行逻辑
+  console.log("DO SOMETHING")
+  // 写入数据库
+  console.log("WRITE DATABASE")
+  return { statusCode: 200 };
 }
 
 /**
@@ -366,18 +358,18 @@ async function createRoomUser(room, user) {
       if (room.members.length > MAX_MEMBER - 3) {
         return {
           statusCode: 400,
-          error: "Room is full",
+          body: "Room is full",
         };
       } else {
         return {
           statusCode: 409,
-          error: "Version mismatch — concurrent update detected.",
+          body: "Version mismatch — concurrent update detected.",
         };
       }
     }
     return {
       statusCode: 500,
-      error: err.message || "Failed to create room member",
+      body: err.message || "Failed to create room member",
     };
   }
 }
@@ -387,7 +379,7 @@ async function createRoomUser(room, user) {
  * @param {Room} room - 当前房间对象
  * @param {User} user - 需要更新的用户对象
  * @param {number} index - 用户在 members 数组中的位置
- * @returns {Promise<{statusCode: number, error?: string}>}
+ * @returns {Promise<{statusCode: number, body?: string}>}
  */
 async function updateRoomUser(room, user, index) {
   try {
@@ -415,10 +407,10 @@ async function updateRoomUser(room, user, index) {
     if (err.name === "ConditionalCheckFailedException") {
       return {
         statusCode: 409,
-        error: "Version mismatch — concurrent update detected.",
+        body: "Version mismatch — concurrent update detected.",
       };
     }
-    return { statusCode: 500, error: err.message || "Unknown error" };
+    return { statusCode: 500, body: err.message || "Unknown error" };
   }
 }
 
@@ -427,7 +419,7 @@ async function updateRoomUser(room, user, index) {
  * @param {Room} room - 房间对象
  * @param {User} user - 用户对象（将被 stringified）
  * @param {number} index - 要删除的成员在 members 数组中的位置
- * @returns {Promise<{statusCode: number, error?: string}>}
+ * @returns {Promise<{statusCode: number, body?: string}>}
  */
 async function deleteRoomUser(room, user, index) {
   try {
@@ -455,12 +447,12 @@ async function deleteRoomUser(room, user, index) {
     if (err.name === "ConditionalCheckFailedException") {
       return {
         statusCode: 409,
-        error: "Version mismatch — concurrent update detected.",
+        body: "Version mismatch — concurrent update detected.",
       };
     }
     return {
       statusCode: 500,
-      error: err.message || "Failed to delete room member",
+      body: err.message || "Failed to delete room member",
     };
   }
 }
@@ -470,7 +462,7 @@ async function deleteRoomUser(room, user, index) {
  * @property {Room} Item - 房间对象
  * @property {Object} [error] - 错误信息
  * @property {number} error.statusCode - HTTP 状态码
- * @property {string} error.error - 错误消息
+ * @property {string} error.body - 错误消息
  */
 
 /**
@@ -497,7 +489,7 @@ async function getRoomById(roomId) {
     if (!result.Item) {
       result.error = {
         statusCode: 404,
-        error: "Room not found",
+        body: "Room not found",
       };
     }
   } catch (dbError) {
@@ -505,7 +497,7 @@ async function getRoomById(roomId) {
     console.error("Database error:", dbError);
     result.error = {
       statusCode: 500,
-      error: "Database error",
+      body: "Database error",
     };
   }
 
@@ -518,7 +510,7 @@ async function getRoomById(roomId) {
  * @property {number} index - 用户的索引位置
  * @property {Object} [error] - 错误信息
  * @property {number} error.statusCode - HTTP 状态码
- * @property {string} error.error - 错误消息
+ * @property {string} error.body - 错误消息
  */
 
 /**
@@ -546,13 +538,13 @@ function getUserByID(room, by, id) {
     } catch (e) {
       result.error = {
         statusCode: 400,
-        error: "Invalid user data",
+        body: "Invalid user data",
       };
     }
   } else {
     result.error = {
       statusCode: 404,
-      error: "User not found",
+      body: "User not found",
     };
   }
 
