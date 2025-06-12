@@ -24,7 +24,7 @@ const apiGateway = new ApiGatewayManagementApiClient({
 });
 // 获取环境变量中的房间表名
 /** @type {string} */
-const ROOM_TABLE = process.env.ROOM_TABLE;
+const ROOMS_TABLE = process.env.ROOMS_TABLE;
 
 /**
  * @param {WebSocketEvent} event - API Gateway
@@ -35,7 +35,7 @@ module.exports.handler = async (event) => {
   const queryParams = event.queryStringParameters || {};
 
   const roomId = queryParams.room;
-  const body = JSON.parse(event.body);
+  const body = event.body ? JSON.parse(event.body) : {};
   const connectId = event["requestContext"]["connectID"];
 
   if (!roomId) {
@@ -393,7 +393,7 @@ async function updateRoomUser(room, user, index) {
   try {
     const result = await ddbClient.send(
       new UpdateCommand({
-        TableName: ROOM_TABLE, // 确保与你 DynamoDB 中的表名一致
+        TableName: ROOMS_TABLE, // 确保与你 DynamoDB 中的表名一致
         Key: { id: room.id },
         ConditionExpression: "#ver = :ver",
         UpdateExpression: `SET #members[${index}].connectID = :cid, #ver = :newVer`,
@@ -485,9 +485,9 @@ async function getRoomById(roomId) {
 
   // 查询数据库中是否存在该房间
   const command = new GetCommand({
-    TableName: ROOM_TABLE,
+    TableName: ROOMS_TABLE,
     Key: {
-      roomId: roomId,
+      id: roomId,
     },
   });
 
@@ -505,7 +505,7 @@ async function getRoomById(roomId) {
     console.error("Database error:", dbError);
     result.error = {
       statusCode: 500,
-      error: "Internal server error",
+      error: "Database error",
     };
   }
 

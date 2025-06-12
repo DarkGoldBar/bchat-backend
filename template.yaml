@@ -123,9 +123,9 @@ Resources:
     Properties:
       StageName: Prod
       Cors:
-        AllowMethods: 'OPTIONS,POST,GET'
-        AllowHeaders: 'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'
-        AllowOrigin: '*'
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'" 
+        AllowMethods: "'POST'"
+        AllowOrigin: "'*'"
 
   RoomHandlerFunction:
     Type: AWS::Serverless::Function
@@ -140,8 +140,8 @@ Resources:
             RestApiId: !Ref HttpRestApi
             Path: /room
             Method: POST
-            Auth:
-              # ApiKeyRequired: true
+            # Auth:
+            #   ApiKeyRequired: false
 
   ##############################
   # DynamoDB Tables

@@ -85,9 +85,10 @@ function response(statusCode, body) {
     headers: {
       "Content-Type": "application/json",
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Headers": "*",
+      "Access-Control-Allow-Headers": "Content-Type",
+      'Access-Control-Allow-Methods': 'POST'
     },
-    body: JSON.stringify(body),
+    body: body,
   };
 }
 
