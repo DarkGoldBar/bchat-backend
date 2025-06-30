@@ -24,11 +24,10 @@ const apiGateway = new ApiGatewayManagementApiClient({});
  * @returns {Promise<WebSocketResult>} - API Gateway
  */
 module.exports.handler = async (event) => {
-  const route = event.requestContext.routeKey;
   const queryParams = event.queryStringParameters || {};
-
-  const roomId = queryParams.room;
   const body = event.body ? JSON.parse(event.body) : {};
+  const route = event.requestContext.routeKey;
+  const roomId = queryParams.room || body.room;
   const subAction = body.subAction;
   const connectId = event.requestContext.connectionId;
 
@@ -134,21 +133,25 @@ async function handleJoin(roomId, body, connectId) {
   const room = result.Item;
   // 用uuid查找用户对象
   const userResult = getUserByID(room, "uuid", body.user.uuid);
+  let user = userResult.user;
   if (userResult.error) {
     if (userResult.error.statusCode === 404) {
       // 如果用户不存在向数据库的members添加这个user
-      const user = body.user;
+      user = body.user;
       user.connectID = connectId;
       user.position = 0;
+      console.log("[lobby.join]User not exist")
       createRoomUser(room, user);
     } else {
       return userResult.error;
     }
+  } else {
+    // 如果用户存在则更新connectId，然后向数据库的members更新这个user
+    console.log("[lobby.join]User exist")
+    user.connectID = connectId;
+    await updateRoomUser(room, user, userResult.index);
   }
-  // 如果用户存在则更新connectId，然后向数据库的members更新这个user
-  const user = userResult.user;
-  user.connectID = connectId;
-  await updateRoomUser(room, user, userResult.index);
+
   // 广播更新
   await broadcastMessage(room, {
     action: "userJoined",
@@ -304,13 +307,14 @@ async function broadcastMessage(room, payload) {
 async function sendMessage(user, payload) {
   try {
     if (!user.connectID) return;
-
+    const s = JSON.stringify(payload)
     await apiGateway.send(
       new PostToConnectionCommand({
         ConnectionId: user.connectID,
-        Data: Buffer.from(JSON.stringify(payload)),
+        Data: Buffer.from(s),
       })
     );
+    console.log(`Post -> ${user.connectID}: ${s}`)
   } catch (err) {
     if (err.statusCode === 410) {
       // 连接已断开，忽略错误
