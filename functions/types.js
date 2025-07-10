@@ -2,7 +2,7 @@
  * AWS Lambda WebSocket 事件对象
  * @typedef {Object} WebSocketEvent
  * @property {Object} requestContext - 请求上下文
- * @property {string} requestContext.connectID - 当前连接的唯一标识
+ * @property {string} requestContext.connectionId - 当前连接的唯一标识
  * @property {string} requestContext.domainName - 调用的域名
  * @property {string} requestContext.stage - 所在的部署阶段
  * @property {string} requestContext.routeKey - 路由键

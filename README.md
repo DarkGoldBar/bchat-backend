@@ -14,6 +14,7 @@
 ## 数据库
 
 - DynamoDB 中只存在一个 Room 表。这个表的数据结构与"types.js"中的`Room`类完全相同。
+    - Room 表同时需要记录 ConnectionID -> RoomID 的映射。用于$disconnect时的逻辑处理。
 
 ## 命令行
 

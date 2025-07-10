@@ -3,7 +3,7 @@
 /** @typedef {import('../types.js').WebSocketEvent} WebSocketEvent */
 /** @typedef {import('../types.js').WebSocketResult} WebSocketResult */
 
-const { GetCommand, UpdateCommand, DynamoDBDocumentClient } = require("@aws-sdk/lib-dynamodb");
+const { GetCommand, PutCommand, UpdateCommand, DynamoDBDocumentClient } = require("@aws-sdk/lib-dynamodb");
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
 const {
   ApiGatewayManagementApiClient,
@@ -33,13 +33,6 @@ module.exports.handler = async (event) => {
 
   console.log(`READ route=${route};roomId=${roomId};connectId=${connectId};body=${event.body}`)
 
-  if (!roomId) {
-    return {
-      statusCode: 400,
-      body: "Room ID is required",
-    };
-  }
-
   /** @type {WebSocketResult} */
   let result = { statusCode: 500 };
   for (let trials = 0; trials < MAX_409_RETRY; trials++) {
@@ -57,7 +50,7 @@ module.exports.handler = async (event) => {
       case "$connect":
         return await handleConnect(roomId);
       case "$disconnect":
-        return await handleDisconnect(roomId, connectId);
+        return await handleDisconnect(connectId);
       case "lobby":
         switch (subAction) {
           case "join":
@@ -80,13 +73,22 @@ module.exports.handler = async (event) => {
 };
 
 async function handleConnect(roomId) {
+  if (!roomId) {
+    return { statusCode: 400, body: "Invalid body" };
+  }
   // 查询数据库中是否存在该房间
   const result = await getRoomById(roomId);
   if (result.error) return result.error;
   return { statusCode: 200 };
 }
 
-async function handleDisconnect(roomId, connectId) {
+async function handleDisconnect(connectId) {
+  const command = new GetCommand({
+    TableName: ROOMS_TABLE,
+    Key: { id: connectId },
+  });
+  const connectResult = await dynamo.send(command);
+  const roomId = connectResult.Item.lastState;
   // 获取房间信息
   const result = await getRoomById(roomId);
   if (result.error) return result.error;
@@ -119,11 +121,11 @@ async function handleDisconnect(roomId, connectId) {
  * @returns {Promise<WebSocketResult>}
  */
 async function handleJoin(roomId, body, connectId) {
+  if (!roomId) {
+    return { statusCode: 400, body: "Invalid roomId" };
+  }
   if (!body.user || !body.user.uuid || !body.user.name || !body.user.avatar) {
-    return {
-      statusCode: 400,
-      body: "Invalid body",
-    };
+    return { statusCode: 400, body: "Invalid body" };
   }
   // 获取房间信息
   const result = await getRoomById(roomId);
@@ -151,6 +153,18 @@ async function handleJoin(roomId, body, connectId) {
     user.connectID = connectId;
     await updateRoomUser(room, user, userResult.index);
   }
+
+  await dynamo.send(
+    new PutCommand({
+      TableName: ROOMS_TABLE,
+      Item: {
+        id: user.connectID,
+        lastState: room.id,
+        ttl: room.ttl
+      },
+      ConditionExpression: "attribute_not_exists(id)",
+    })
+  );
 
   // 广播更新
   await broadcastMessage(room, {
@@ -327,8 +341,8 @@ async function sendMessage(user, payload) {
 
 /**
  * 向房间添加新成员
- * @param {{Room}} room - 房间对象
- * @param {{User}} user - 要添加的用户对象
+ * @param {Room} room - 房间对象
+ * @param {User} user - 要添加的用户对象
  * @returns {{Promise<{WebSocketResult}>}}
  */
 async function createRoomUser(room, user) {
@@ -336,7 +350,7 @@ async function createRoomUser(room, user) {
     const userString = JSON.stringify(user);
 
     const command = new UpdateCommand({
-      TableName: "Room",
+      TableName: ROOMS_TABLE,
       Key: { id: room.id },
       UpdateExpression:
         "SET #members = list_append(if_not_exists(#members, :empty), :newMember), #version = :newVer",
