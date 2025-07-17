@@ -44,7 +44,7 @@
  * @property {string} avatar.text - 
  * @property {string} avatar.color - 
  * @property {string} avatar.img - 
- * @property {string} [connectID] - 连接ID。
+ * @property {string} [connectId] - 连接ID。
  * @property {number} [position] - 房间中的位置。0为观众位，观众位可以重复，其他位置不可重复。不能大于房间的最大位置。
  */
 

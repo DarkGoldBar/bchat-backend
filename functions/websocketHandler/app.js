@@ -19,98 +19,109 @@ const ddbClient = new DynamoDBClient({});
 const dynamo = DynamoDBDocumentClient.from(ddbClient);
 const apiGateway = new ApiGatewayManagementApiClient({});
 
-/**
- * @param {WebSocketEvent} event - API Gateway
- * @returns {Promise<WebSocketResult>} - API Gateway
- */
 module.exports.handler = async (event) => {
   const queryParams = event.queryStringParameters || {};
   const body = event.body ? JSON.parse(event.body) : {};
-  const route = event.requestContext.routeKey;
+  const route = body.action ?? event.requestContext.routeKey;
   const roomId = queryParams.room || body.room;
   const subAction = body.subAction;
   const connectId = event.requestContext.connectionId;
 
   console.log(`READ route=${route};roomId=${roomId};connectId=${connectId};body=${event.body}`)
 
-  /** @type {WebSocketResult} */
-  let result = { statusCode: 500 };
   for (let trials = 0; trials < MAX_409_RETRY; trials++) {
-    result = await router();
-    console.log("WRITE", JSON.stringify(result))
-    if (result.statusCode !== 409) break;
-  }
-  return result;
-
-  /**
-   * @returns {Promise<WebSocketResult>}
-   */
-  async function router() {
-    switch (route) {
-      case "$connect":
-        return await handleConnect(roomId);
-      case "$disconnect":
-        return await handleDisconnect(connectId);
-      case "lobby":
-        switch (subAction) {
-          case "join":
-            return await handleJoin(roomId, body, connectId);
-          case "changeposition":
-            return await handleChangePosition(roomId, body, connectId);
-          case "message":
-            return await handleMessage(roomId, body, connectId);
+    try {
+      await router(route, subAction, roomId, body, connectId);
+      break;
+    } catch (err) {
+      if (err.name === "ConditionalCheckFailedException") {
+        if (trials === MAX_409_RETRY - 1) {
+          throw new Error("Max trials reached");
         }
-      case "wuziqi":
-        return await handleWuziqi(roomId, body, connectId);
-      case "$default":
-      default:
-        return {
-          statusCode: 400,
-          body: "Invalid action",
-        };
+      } else {
+        throw err
+      }
     }
   }
-};
-
-async function handleConnect(roomId) {
-  if (!roomId) {
-    return { statusCode: 400, body: "Invalid body" };
-  }
-  // 查询数据库中是否存在该房间
-  const result = await getRoomById(roomId);
-  if (result.error) return result.error;
-  return { statusCode: 200 };
 }
 
+async function router(route, subAction, roomId, body, connectId) {
+  switch (route) {
+    case "$connect":
+      return await handleConnect(connectId, roomId);
+    case "$disconnect":
+      return await handleDisconnect(connectId);
+    case "lobby":
+      switch (subAction) {
+        case "join":
+          return await handleJoin(roomId, body, connectId);
+        case "changeposition":
+          return await handleChangePosition(roomId, body, connectId);
+        case "message":
+          return await handleMessage(roomId, body, connectId);
+      }
+    case "wuziqi":
+      return await handleWuziqi(subAction, roomId, body, connectId);
+    case "$default":
+    default:
+      throw new Error(`Invalid route`);
+  }
+}
+
+/**
+ * @param {string} connectId
+ * @param {string} roomId
+ */
+async function handleConnect(connectId, roomId) {
+  if (!roomId) {
+    throw new Error(`Invalid param`);
+  }
+  // 保存关联 connectId -> roomId
+  await dynamo.send(
+    new PutCommand({
+      TableName: ROOMS_TABLE,
+      Item: {
+        id: connectId,
+        lastState: roomId,
+        ttl: Math.floor(Date.now() / 1000) + 86400
+      },
+    })
+  );
+}
+
+/**
+ * @param {string} connectId
+ */
 async function handleDisconnect(connectId) {
-  const command = new GetCommand({
-    TableName: ROOMS_TABLE,
-    Key: { id: connectId },
-  });
-  const connectResult = await dynamo.send(command);
+  // 获取关联 connectId -> roomId
+  const connectResult = await dynamo.send(
+    new GetCommand({
+      TableName: ROOMS_TABLE,
+      Key: { id: connectId },
+    })
+  );
   const roomId = connectResult.Item.lastState;
   // 获取房间信息
   const result = await getRoomById(roomId);
-  if (result.error) return result.error;
   const room = result.Item;
+  if (!room) throw new Error("Invalid room");
   // 用connectId查找用户对象
-  const userResult = getUserByID(room, "connectId", connectId);
-  if (userResult.error) return userResult.error;
-  const user = userResult.user;
-  // 根据用户的position更新用户的 connectID 或者删掉用户
+  const members = room.members.map(s => JSON.parse(s));
+  const user = members.filter(m => m.connectId === connectId)[0];
+  const userIndex = members.indexOf(user);
+  if (!user) throw new Error("Invalid user");
+  // 根据用户的position更新用户的 connectId 或者删掉用户
   if (user.position) {
-    user.connectID = null;
-    await updateRoomUser(room, user, userResult.index);
+    user.connectId = null;
+    await updateRoomUser(room, user, userIndex);
   } else {
-    await deleteRoomUser(room, user, userResult.index);
+    await deleteRoomUser(room, user, userIndex);
   }
   // 广播更新
-  const payload = {
+  await broadcastMessage(room, {
     action: "userDisconnected",
     user: user,
-  };
-  await broadcastMessage(room, payload);
-  return { statusCode: 200 };
+  });
 }
 
 /**
@@ -118,53 +129,34 @@ async function handleDisconnect(connectId) {
  * @param {object} body
  * @param {User} body.user
  * @param {string} connectId
- * @returns {Promise<WebSocketResult>}
  */
 async function handleJoin(roomId, body, connectId) {
-  if (!roomId) {
-    return { statusCode: 400, body: "Invalid roomId" };
-  }
-  if (!body.user || !body.user.uuid || !body.user.name || !body.user.avatar) {
-    return { statusCode: 400, body: "Invalid body" };
+  if (!roomId || !body.user || !body.user.uuid || !body.user.name || !body.user.avatar) {
+    throw new Error(`Invalid param`);
   }
   // 获取房间信息
   const result = await getRoomById(roomId);
-  if (result.error) {
-    return result.error;
-  }
+  /** @type {Room} */
   const room = result.Item;
-  // 用uuid查找用户对象
-  const userResult = getUserByID(room, "uuid", body.user.uuid);
-  let user = userResult.user;
-  if (userResult.error) {
-    if (userResult.error.statusCode === 404) {
-      // 如果用户不存在向数据库的members添加这个user
-      user = body.user;
-      user.connectID = connectId;
-      user.position = 0;
-      console.log("[lobby.join]User not exist")
-      createRoomUser(room, user);
-    } else {
-      return userResult.error;
-    }
-  } else {
-    // 如果用户存在则更新connectId，然后向数据库的members更新这个user
+  if (!room) throw new Error("Invalid room");
+  // 用connectId查找用户对象
+  /** @type {User[]} */
+  const members = room.members.map(s => JSON.parse(s));
+  let user = members.filter(m => m.uuid === body.user.uuid)[0];
+  const userIndex = members.indexOf(user);
+  // 根据用户是否存在更新用户的 connectId 或者添加用户
+  if (user) {
+    user.connectId = connectId;
     console.log("[lobby.join]User exist")
-    user.connectID = connectId;
-    await updateRoomUser(room, user, userResult.index);
+    await updateRoomUser(room, user, userIndex);
+  } else {
+    user = body.user;
+    user.connectId = connectId;
+    user.position = 0;
+    console.log("[lobby.join]User not exist")
+    if (members.length >= MAX_MEMBER) throw new Error("Max members reached");
+    await createRoomUser(room, user);
   }
-
-  await dynamo.send(
-    new PutCommand({
-      TableName: ROOMS_TABLE,
-      Item: {
-        id: user.connectID,
-        lastState: room.id,
-        ttl: room.ttl
-      },
-      ConditionExpression: "attribute_not_exists(id)",
-    })
-  );
 
   // 广播更新
   await broadcastMessage(room, {
@@ -176,7 +168,6 @@ async function handleJoin(roomId, body, connectId) {
     action: "init",
     room: room,
   });
-  return { statusCode: 200 };
 }
 
 /**
@@ -184,49 +175,32 @@ async function handleJoin(roomId, body, connectId) {
  * @param {object} body
  * @param {number} body.position
  * @param {string} connectId
- * @returns {Promise<WebSocketResult>}
  */
 async function handleChangePosition(roomId, body, connectId) {
   if (!body || body.position === undefined || body.position === null) {
-    return {
-      statusCode: 400,
-      body: "Invalid body",
-    };
+    throw new Error(`Invalid param`);
   }
   // 获取房间信息
   const result = await getRoomById(roomId);
-  if (result.error) {
-    return result.error;
-  }
   const room = result.Item;
+  if (!room) throw new Error("Invalid room");
   // 用connectId查找用户对象
-  const userResult = getUserByID(room, "connectId", connectId);
-  if (userResult.error) {
-    return userResult.error;
-  }
-  const user = userResult.user;
-  // 获取其他用户的位置, 如重复且非0则报错
-  if (body.position !== 0) {
-    const users = parseMembers(room.members).filter(
-      (u) => u.uuid !== user.uuid
-    );
-    if (users.some((u) => u.position === body.position)) {
-      return {
-        statusCode: 400,
-        body: "Invalid parameter",
-      };
-    }
+  const members = room.members.map(s => JSON.parse(s));
+  const user = members.filter(m => m.connectId === connectId)[0];
+  const userIndex = members.indexOf(user);
+  if (!user) throw new Error("Invalid user");
+  // 获取其他用户的位置, 如非0且重复则报错
+  if ((body.position !== 0) && (members.some(m => m.position === body.position))) {
+    throw new Error("Invalid position");
   }
   // 更新用户
   user.position = body.position;
-  await updateRoomUser(room, user, userResult.index);
+  await updateRoomUser(room, user, userIndex);
   // 广播更新
-  const payload = {
+  await broadcastMessage(room, {
     action: "userChangedPosition",
     user: user,
-  };
-  await broadcastMessage(room, payload);
-  return { statusCode: 200 };
+  });
 }
 
 /**
@@ -239,32 +213,22 @@ async function handleChangePosition(roomId, body, connectId) {
  */
 async function handleMessage(roomId, body, connectId) {
   if (!body || !body.sendto || !body.message) {
-    return {
-      statusCode: 400,
-      body: "Invalid body",
-    };
+    throw new Error(`Invalid param`);
   }
   // 获取房间信息
   const result = await getRoomById(roomId);
-  if (result.error) {
-    return result.error;
-  }
   const room = result.Item;
+  if (!room) throw new Error("Invalid room");
   // 用connectId查找用户对象
-  const userResult = getUserByID(room, "connectId", connectId);
-  if (userResult.error) {
-    return userResult.error;
-  }
-  const user = userResult.user;
+  const members = room.members.map(s => JSON.parse(s));
+  const user = members.filter(m => m.connectId === connectId)[0];
+  const userIndex = members.indexOf(user);
+  if (!user) throw new Error("Invalid user");
   // 用uuid查找用户对象
-  const targetResult = getUserByID(room, "uuid", body.sendto);
-  if (targetResult.error) {
-    return targetResult.error;
-  }
-  const target = targetResult.user;
+  const target = members.filter(m => m.uuid === connectId)[0];
+  if (!target) throw new Error("Invalid target");
   // 发送消息
   await sendMessage(target, Object.assign(body, { sender: user.uuid }));
-  return { statusCode: 200 };
 }
 
 async function handleWuziqi(roomId, body, connectId) {
@@ -295,7 +259,7 @@ async function handleWuziqi(roomId, body, connectId) {
 
 /**
  * 广播消息到多个用户
- * @param {Room} room - 用户列表
+ * @param {Room} room - 房间对象
  * @param {Object} payload - 消息 payload
  */
 async function broadcastMessage(room, payload) {
@@ -303,13 +267,10 @@ async function broadcastMessage(room, payload) {
     console.warn("No members in the room to broadcast to.");
     return;
   }
-  // 获取房间成员列表
-  const users = parseMembers(room.members).filter((u) => u.connectID);
-
-  const broadcasts = users.map(async (/** @type {User} */ user) => {
-    sendMessage(user, payload);
-  });
-
+  const broadcasts = room.members
+    .map(s => JSON.parse(s))
+    .filter(m => m.connectId)
+    .map(async (user) => sendMessage(user, payload));
   await Promise.all(broadcasts);
 }
 
@@ -319,20 +280,19 @@ async function broadcastMessage(room, payload) {
  * @param {Object} payload
  */
 async function sendMessage(user, payload) {
+  if (!user.connectId) return;
   try {
-    if (!user.connectID) return;
     const s = JSON.stringify(payload)
     await apiGateway.send(
       new PostToConnectionCommand({
-        ConnectionId: user.connectID,
+        ConnectionId: user.connectId,
         Data: Buffer.from(s),
       })
     );
-    console.log(`Post -> ${user.connectID}: ${s}`)
+    console.log(`Post -> ${user.connectId}: ${s}`)
   } catch (err) {
-    if (err.statusCode === 410) {
-      // 连接已断开，忽略错误
-      console.log(`Connection ${user.connectID} not found`);
+    if (err.code === "ENOTFOUND" ) {
+      console.warn(`ENOTFOUND ${user.connectId}`);
     } else {
       throw err;
     }
@@ -343,53 +303,29 @@ async function sendMessage(user, payload) {
  * 向房间添加新成员
  * @param {Room} room - 房间对象
  * @param {User} user - 要添加的用户对象
- * @returns {{Promise<{WebSocketResult}>}}
  */
 async function createRoomUser(room, user) {
-  try {
-    const userString = JSON.stringify(user);
+  const userString = JSON.stringify(user);
 
-    const command = new UpdateCommand({
-      TableName: ROOMS_TABLE,
-      Key: { id: room.id },
-      UpdateExpression:
-        "SET #members = list_append(if_not_exists(#members, :empty), :newMember), #version = :newVer",
-      ConditionExpression: "size(#members) < :maxSize && #version = :ver",
-      ExpressionAttributeNames: {
-        "#members": "members",
-        "#version": "version",
-      },
-      ExpressionAttributeValues: {
-        ":newMember": [userString],
-        ":empty": [],
-        ":maxSize": MAX_MEMBER, // 设置最大成员数限制
-        ":newVer": (room.version || 0) + 1,
-        ":ver": room.version || 0,
-      },
-    });
+  const command = new UpdateCommand({
+    TableName: ROOMS_TABLE,
+    Key: { id: room.id },
+    UpdateExpression:
+      "SET #members = list_append(if_not_exists(#members, :empty), :newMember), #version = :newVer",
+    ConditionExpression: "#version = :ver",
+    ExpressionAttributeNames: {
+      "#members": "members",
+      "#version": "version",
+    },
+    ExpressionAttributeValues: {
+      ":newMember": [userString],
+      ":empty": [],
+      ":newVer": (room.version || 0) + 1,
+      ":ver": room.version || 0,
+    },
+  });
 
-    await dynamo.send(command);
-
-    return { statusCode: 200 };
-  } catch (err) {
-    if (err.name === "ConditionalCheckFailedException") {
-      if (room.members.length > MAX_MEMBER - 3) {
-        return {
-          statusCode: 400,
-          body: "Room is full",
-        };
-      } else {
-        return {
-          statusCode: 409,
-          body: "Version mismatch — concurrent update detected.",
-        };
-      }
-    }
-    return {
-      statusCode: 500,
-      body: err.message || "Failed to create room member",
-    };
-  }
+  return await dynamo.send(command);
 }
 
 /**
@@ -397,39 +333,27 @@ async function createRoomUser(room, user) {
  * @param {Room} room - 当前房间对象
  * @param {User} user - 需要更新的用户对象
  * @param {number} index - 用户在 members 数组中的位置
- * @returns {Promise<{statusCode: number, body?: string}>}
  */
 async function updateRoomUser(room, user, index) {
-  try {
-    const result = await ddbClient.send(
-      new UpdateCommand({
-        TableName: ROOMS_TABLE, // 确保与你 DynamoDB 中的表名一致
-        Key: { id: room.id },
-        ConditionExpression: "#ver = :ver",
-        UpdateExpression: `SET #members[${index}].connectID = :cid, #ver = :newVer`,
-        ExpressionAttributeNames: {
-          "#members": "members",
-          "#ver": "version",
-        },
-        ExpressionAttributeValues: {
-          ":cid": user.connectID,
-          ":ver": room.version,
-          ":newVer": room.version + 1,
-        },
-        ReturnValues: "NONE",
-      })
-    );
+  const userString = JSON.stringify(user);
 
-    return { statusCode: 200 };
-  } catch (err) {
-    if (err.name === "ConditionalCheckFailedException") {
-      return {
-        statusCode: 409,
-        body: "Version mismatch — concurrent update detected.",
-      };
-    }
-    return { statusCode: 500, body: err.message || "Unknown error" };
-  }
+  const command = new UpdateCommand({
+    TableName: ROOMS_TABLE, // 确保与你 DynamoDB 中的表名一致
+    Key: { id: room.id },
+    ConditionExpression: "#ver = :ver",
+    UpdateExpression: `SET #members[${index}] = :user, #ver = :newVer`,
+    ExpressionAttributeNames: {
+      "#members": "members",
+      "#ver": "version",
+    },
+    ExpressionAttributeValues: {
+      ":user": userString,
+      ":ver": room.version,
+      ":newVer": room.version + 1,
+    },
+    ReturnValues: "NONE",
+  })
+  return await dynamo.send(command);
 }
 
 /**
@@ -437,147 +361,34 @@ async function updateRoomUser(room, user, index) {
  * @param {Room} room - 房间对象
  * @param {User} user - 用户对象（将被 stringified）
  * @param {number} index - 要删除的成员在 members 数组中的位置
- * @returns {Promise<{statusCode: number, body?: string}>}
  */
 async function deleteRoomUser(room, user, index) {
-  try {
-    const userString = JSON.stringify(user);
+  const userString = JSON.stringify(user);
 
-    const command = new UpdateCommand({
-      TableName: "Room",
-      Key: { id: room.id },
-      UpdateExpression: `REMOVE #members[${index}] SET #version = :newVer`,
-      ConditionExpression: `#members[${index}] = :expected`,
-      ExpressionAttributeNames: {
-        "#members": "members",
-        "#version": "version",
-      },
-      ExpressionAttributeValues: {
-        ":expected": userString,
-        ":newVer": (room.version || 0) + 1,
-      },
-    });
-
-    await dynamo.send(command);
-
-    return { statusCode: 200 };
-  } catch (err) {
-    if (err.name === "ConditionalCheckFailedException") {
-      return {
-        statusCode: 409,
-        body: "Version mismatch — concurrent update detected.",
-      };
-    }
-    return {
-      statusCode: 500,
-      body: err.message || "Failed to delete room member",
-    };
-  }
-}
-
-/**
- * @typedef {Object} getRoomResult
- * @property {Room} Item - 房间对象
- * @property {Object} [error] - 错误信息
- * @property {number} error.statusCode - HTTP 状态码
- * @property {string} error.body - 错误消息
- */
-
-/**
- * 从数据库中获取房间
- *
- * @param {string} roomId - Room id
- * @returns {Promise<getRoomResult>}
- */
-async function getRoomById(roomId) {
-  /** @type {getRoomResult} */
-  const result = {};
-
-  // 查询数据库中是否存在该房间
-  const command = new GetCommand({
-    TableName: ROOMS_TABLE,
-    Key: {
-      id: roomId,
+  const command = new UpdateCommand({
+    TableName: "Room",
+    Key: { id: room.id },
+    UpdateExpression: `REMOVE #members[${index}] SET #version = :newVer`,
+    ConditionExpression: `#members[${index}] = :expected`,
+    ExpressionAttributeNames: {
+      "#members": "members",
+      "#version": "version",
+    },
+    ExpressionAttributeValues: {
+      ":expected": userString,
+      ":newVer": (room.version || 0) + 1,
     },
   });
 
-  try {
-    Object.assign(result, await dynamo.send(command));
-
-    if (!result.Item) {
-      result.error = {
-        statusCode: 404,
-        body: "Room not found",
-      };
-    }
-  } catch (dbError) {
-    // 数据库查询错误
-    console.error("Database error:", dbError);
-    result.error = {
-      statusCode: 500,
-      body: "Database error",
-    };
-  }
-
-  return result;
+  return await dynamo.send(command);
 }
 
-/**
- * @typedef {Object} getUserResult
- * @property {User} user - 用户对象
- * @property {number} index - 用户的索引位置
- * @property {Object} [error] - 错误信息
- * @property {number} error.statusCode - HTTP 状态码
- * @property {string} error.body - 错误消息
- */
 
-/**
- * 根据连接 ID 获取用户
- *
- * @param {Room} room - 房间信息
- * @param {'connectId' | 'uuid'} by - ID类型
- * @param {string} id - 连接 ID
- * @returns {getUserResult}
- */
-function getUserByID(room, by, id) {
-  /** @type {getUserResult} */
-  const result = {};
-
-  /** @type {string} */
-  let userString = null;
-  const query = `"${by}":"${id}"`;
-  if (room && room.members) {
-    userString = room.members.find((s) => s.includes(query));
-    result.index = room.members.indexOf(userString);
-  }
-  if (userString) {
-    try {
-      result.user = JSON.parse(userString);
-    } catch (e) {
-      result.error = {
-        statusCode: 400,
-        body: "Invalid user data",
-      };
-    }
-  } else {
-    result.error = {
-      statusCode: 404,
-      body: "User not found",
-    };
-  }
-
-  return result;
-}
-
-function parseMembers(userStringArr) {
-  const users = userStringArr.members
-    .map((member) => {
-      try {
-        return JSON.parse(member);
-      } catch (e) {
-        return null;
-      }
+async function getRoomById(roomId) {
+  return await dynamo.send(
+    new GetCommand({
+      TableName: ROOMS_TABLE,
+      Key: { id: roomId }
     })
-    .filter((u) => u);
-  return users;
+  );
 }
