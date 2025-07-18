@@ -2,6 +2,11 @@ AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: BChat backend powered by AWS SAM
 
+Parameters:
+  StageName:
+    Type: String
+    Default: "prod"
+
 Globals:
   Api:
     EndpointConfiguration: REGIONAL
@@ -68,6 +73,13 @@ Resources:
       Handler: app.handler
       Timeout: 10
       Role: !GetAtt SharedFunctionRole.Arn
+      Environment:
+        Variables:
+          # WEBSOCKET_EP: !Sub "https://${BChatWebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/${BChatWebSocketStage}"
+          WEBSOCKET_EP:
+            Fn::Sub:
+              - "https://${ApiId}.execute-api.${AWS::Region}.amazonaws.com/${StageName}"
+              - ApiId: !Ref BChatWebSocketApi
 
   WebSocketPermission:
     Type: AWS::Lambda::Permission
@@ -135,7 +147,7 @@ Resources:
   BChatWebSocketStage:
     Type: AWS::ApiGatewayV2::Stage
     Properties:
-      StageName: prod
+      StageName: !Ref StageName
       AutoDeploy: true
       DeploymentId: !Ref WebSocketDeployment
       ApiId: !Ref BChatWebSocketApi
@@ -146,7 +158,7 @@ Resources:
   HttpRestApi:
     Type: AWS::Serverless::Api
     Properties:
-      StageName: Prod
+      StageName: !Ref StageName
       Cors:
         AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'" 
         AllowMethods: "'POST'"

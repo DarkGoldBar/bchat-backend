@@ -12,12 +12,15 @@ const {
 
 /** @type {string} */
 const ROOMS_TABLE = process.env.ROOMS_TABLE;
+const WEBSOCKET_EP = process.env.WEBSOCKET_EP;
 const MAX_MEMBER = 20;
 const MAX_409_RETRY = 3;
 
 const ddbClient = new DynamoDBClient({});
 const dynamo = DynamoDBDocumentClient.from(ddbClient);
-const apiGateway = new ApiGatewayManagementApiClient({});
+const apiGateway = new ApiGatewayManagementApiClient({
+  endpoint: WEBSOCKET_EP
+});
 
 module.exports.handler = async (event) => {
   const queryParams = event.queryStringParameters || {};
