@@ -32,17 +32,14 @@ module.exports.handler = async (event) => {
   for (let trials = 0; trials < MAX_409_RETRY; trials++) {
     try {
       await router(route, subAction, roomId, body, connectId);
-      break;
+      return { statusCode: 200 };
     } catch (err) {
-      if (err.name === "ConditionalCheckFailedException") {
-        if (trials === MAX_409_RETRY - 1) {
-          throw new Error("Max trials reached");
-        }
-      } else {
+      if (err.name !== "ConditionalCheckFailedException") {
         throw err
       }
     }
   }
+  throw new Error("Max trials reached");
 }
 
 async function router(route, subAction, roomId, body, connectId) {
@@ -55,7 +52,7 @@ async function router(route, subAction, roomId, body, connectId) {
       switch (subAction) {
         case "join":
           return await handleJoin(roomId, body, connectId);
-        case "changeposition":
+        case "changePosition":
           return await handleChangePosition(roomId, body, connectId);
         case "message":
           return await handleMessage(roomId, body, connectId);
@@ -233,28 +230,19 @@ async function handleMessage(roomId, body, connectId) {
 
 async function handleWuziqi(roomId, body, connectId) {
   if (!body) {
-    return {
-      statusCode: 400,
-      body: "Invalid body",
-    };
+    throw new Error(`Invalid param`);
   }
   // 获取房间信息
   const result = await getRoomById(roomId);
-  if (result.error) {
-    return result.error;
-  }
   const room = result.Item;
+  if (!room) throw new Error("Invalid room");
   // 用connectId查找用户对象
-  const userResult = getUserByID(room, "connectId", connectId);
-  if (userResult.error) {
-    return userResult.error;
-  }
-  const user = userResult.user;
+  const members = room.members.map(s => JSON.parse(s));
+  const user = members.filter(m => m.connectId === connectId)[0];
   // 执行逻辑
   console.log("DO SOMETHING")
   // 写入数据库
   console.log("WRITE DATABASE")
-  return { statusCode: 200 };
 }
 
 /**
@@ -338,7 +326,7 @@ async function updateRoomUser(room, user, index) {
   const userString = JSON.stringify(user);
 
   const command = new UpdateCommand({
-    TableName: ROOMS_TABLE, // 确保与你 DynamoDB 中的表名一致
+    TableName: ROOMS_TABLE,
     Key: { id: room.id },
     ConditionExpression: "#ver = :ver",
     UpdateExpression: `SET #members[${index}] = :user, #ver = :newVer`,
@@ -366,7 +354,7 @@ async function deleteRoomUser(room, user, index) {
   const userString = JSON.stringify(user);
 
   const command = new UpdateCommand({
-    TableName: "Room",
+    TableName: ROOMS_TABLE,
     Key: { id: room.id },
     UpdateExpression: `REMOVE #members[${index}] SET #version = :newVer`,
     ConditionExpression: `#members[${index}] = :expected`,
