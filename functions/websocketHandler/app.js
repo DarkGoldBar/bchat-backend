@@ -279,8 +279,8 @@ async function sendMessage(user, payload) {
     );
     console.log(`Post -> ${user.connectId}: ${s}`)
   } catch (err) {
-    if (err.code === "ENOTFOUND" ) {
-      console.warn(`ENOTFOUND ${user.connectId}`);
+    if (err.name === "GoneException" ) {
+      console.warn(`GoneException ${user.connectId}`);
     } else {
       throw err;
     }
