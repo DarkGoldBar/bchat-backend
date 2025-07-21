@@ -29,7 +29,7 @@ async function createRoom(type) {
   const createdAt = Math.floor(Date.now() / 1000);
   /** @type {Room} */
   const room = {
-    id,
+    id: "null",
     type,
     stage: 'lobby',
     posLimit: 2,

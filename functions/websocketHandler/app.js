@@ -141,7 +141,7 @@ async function handleJoin(roomId, body, connectId) {
     await updateRoomUser(room, user, userIndex);
   } else {
     console.log("[lobby.join]User not exist")
-    if (members.length + 1 >= MAX_MEMBER) throw new Error("Max members reached");
+    if (room.members.length + 1 >= MAX_MEMBER) throw new Error("Max members reached");
     user = body.user;
     user.connectId = connectId;
     user.position = 0;
@@ -178,7 +178,7 @@ async function handleChangePosition(roomId, body, connectId) {
   const userIndex = room.members.indexOf(user);
   if (!user) throw new Error("Invalid user");
   // 获取其他用户的位置, 如非0且重复则报错
-  if ((body.position !== 0) && (members.some(m => m.position === body.position))) {
+  if ((body.position !== 0) && (room.members.some(m => m.position === body.position))) {
     throw new Error("Invalid position");
   }
   // 更新用户
@@ -205,7 +205,7 @@ async function handleChangePosLimit(roomId, body){
   if (!room) throw new Error("Invalid room");
   // 修改位置
   room.posLimit = body.posLimit;
-  room.members.forEach(m => { if (m.position >= room.posLimit) m.position = 0 });
+  room.members.forEach(m => { if (m.position > room.posLimit) m.position = 0 });
   updateRoom(room);
   // BoardCast
   await broadcastMessage(room, {
@@ -235,7 +235,7 @@ async function handleMessage(roomId, body, connectId) {
   const userIndex = room.members.indexOf(user);
   if (!user) throw new Error("Invalid user");
   // 用uuid查找用户对象
-  const target = members.find(m => m.uuid === connectId);
+  const target = room.members.find(m => m.uuid === connectId);
   if (!target) throw new Error("Invalid target");
   // 发送消息
   await sendMessage(target, Object.assign(body, { sender: user.uuid }));
@@ -299,9 +299,9 @@ async function getRoomById(roomId) {
   );
   if (result.Item) {
     result.Item.members = result.Item.members.map(s => JSON.parse(s))
+    return result;
   }
 }
-
 
 /**
  * UPDATE ROOM
@@ -390,6 +390,10 @@ async function deleteRoomUser(room, index) {
  */
 async function sendMessage(user, payload) {
   if (!user.connectId) return;
+  if (user.connectId.startsWith('$TEST')) {
+    console.log(JSON.stringify(payload));
+    return;
+  }
   try {
     const s = JSON.stringify(payload)
     await apiGateway.send(
