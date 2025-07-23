@@ -202,8 +202,8 @@ Resources:
 Outputs:
   WebSocketURL:
     Description: "WebSocket API URL"
-    Value: !Sub "wss://${BChatWebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/${BChatWebSocketStage}"
+    Value: !Sub "wss://${BChatWebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}"
 
   RestApiUrl:
-    Description: "Base URL for REST API (Stage: Prod)"
-    Value: !Sub "https://${HttpRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+    Description: "Base URL for REST API"
+    Value: !Sub "https://${HttpRestApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}"
