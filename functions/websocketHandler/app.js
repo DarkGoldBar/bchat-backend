@@ -6,19 +6,15 @@ const {
   GetCommand,
   PutCommand,
   DeleteCommand,
-  DynamoDBDocumentClient,
 } = require('@aws-sdk/lib-dynamodb')
-const { DynamoDBClient } = require('@aws-sdk/client-dynamodb')
 
 const { lobbyHandler } = require('./handlerLobby')
 const { wuziqiHandler } = require('./handlerWuziqi')
-const { sendMessage, broadcastMessage } = require('./postMessage')
+const { sendMessage, broadcastMessage } = require('./ifApiGateway')
+const { dynamo } = require('./ifDynamoDB')
 
 const ROOMS_TABLE = process.env.ROOMS_TABLE
 const MAX_RETRIES = 3
-
-const ddbClient = new DynamoDBClient({})
-const dynamo = DynamoDBDocumentClient.from(ddbClient)
 
 module.exports.handler = async event => {
   const queryParams = event.queryStringParameters || {}

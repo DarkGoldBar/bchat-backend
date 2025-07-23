@@ -1,23 +1,17 @@
 /** @typedef {import('../types.js').Room} Room */
 /** @typedef {import('../types.js').User} User */
 
-const { broadcastMessage } = require('./postMessage')
-// DynamoDB SDK
-const {
-  PutCommand,
-  UpdateCommand,
-  DynamoDBDocumentClient,
-} = require('@aws-sdk/lib-dynamodb')
-const { DynamoDBClient } = require('@aws-sdk/client-dynamodb')
-const ddbClient = new DynamoDBClient({})
+const { broadcastMessage } = require('./ifApiGateway')
+const { PutCommand, UpdateCommand } = require('@aws-sdk/lib-dynamodb')
 const dynamo = DynamoDBDocumentClient.from(ddbClient)
-const ROOMS_TABLE = process.env.ROOMS_TABLE
 
+const ROOMS_TABLE = process.env.ROOMS_TABLE
 const MAX_MEMBER = 20
 
 const ActionMap = {
   join: handleJoin,
   leave: handleLeave,
+  startGame: handleStartGame,
   changePosition: handleChangePosition,
   changePosLimit: handleChangePosLimit,
   changeSelf: handleChangeSelf,
@@ -36,14 +30,20 @@ module.exports.lobbyHandler = async (subAction, room, user, context) => {
   return await ActionMap[subAction](room, user, context)
 }
 
-
 /**
  * @param {Room} room
  * @param {object} context
  * @param {User} context.user
  */
 async function handleJoin(room, { connectId }, context) {
-  if (!context || !context.user || !context.user.uuid || !context.user.name || !context.user.avatar || !connectId) {
+  if (
+    !context ||
+    !context.user ||
+    !context.user.uuid ||
+    !context.user.name ||
+    !context.user.avatar ||
+    !connectId
+  ) {
     throw new Error(`Invalid param`)
   }
   let user = room.members.find(m => m.uuid === context.user.uuid)
@@ -89,7 +89,6 @@ async function handleJoin(room, { connectId }, context) {
   })
 }
 
-
 /**
  * @param {Room} room
  * @param {User} user
@@ -122,7 +121,6 @@ async function handleLeave(room, user) {
   })
 }
 
-
 /**
  * @param {Room} room
  * @param {User} user
@@ -132,7 +130,7 @@ async function handleLeave(room, user) {
 async function handleChangePosition(room, user, context) {
   // 校验
   const position = context.position
-  if (position === undefined || position === null) {  
+  if (position === undefined || position === null) {
     throw new Error(`Invalid param`)
   }
   // 逻辑
@@ -149,7 +147,6 @@ async function handleChangePosition(room, user, context) {
     room: room,
   })
 }
-
 
 /**
  * @param {Room} room
@@ -174,7 +171,6 @@ async function handleChangeSelf(room, user, context) {
   })
 }
 
-
 /**
  * @param {Room} room
  * @param {User} user
@@ -184,7 +180,7 @@ async function handleChangeSelf(room, user, context) {
 async function handleChangePosLimit(room, user, context) {
   // 校验
   const posLimit = context.posLimit
-  if (position === undefined || position === null) {  
+  if (position === undefined || position === null) {
     throw new Error(`Invalid param`)
   }
   // 逻辑
@@ -202,7 +198,6 @@ async function handleChangePosLimit(room, user, context) {
     room: room,
   })
 }
-
 
 /**
  * UPDATE ROOM
@@ -229,7 +224,6 @@ async function updateRoom(room) {
   })
   await dynamo.send(command)
 }
-
 
 /**
  * UPDATE USER

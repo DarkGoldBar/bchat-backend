@@ -35,7 +35,7 @@
  * @property {RoomStage} stage - 状态值
  * @property {number} posLimit - 玩家位置上限
  * @property {User[]} members - 房间成员对象。在数据库中时，用json字符串存储。
- * @property {string} body - 游戏数据
+ * @property {Object} body - 游戏数据
  * @property {number} createdAt - 创建时间
  * @property {number} ttl - 生存时间
  * @property {number} version - 乐观锁版本
