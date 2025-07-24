@@ -1,0 +1,12 @@
+{
+  "version": "2.0",
+  "queryStringParameters": {
+    "room": "abcd"
+  },
+  "requestContext": {
+    "connectionId": "$TEST",
+    "routeKey": "lobby",
+    "stage": "test"
+  },
+  "body": "{\"action\":\"lobby\",\"subAction\":\"join\",\"user\":{\"uuid\":\"dfc4c9a8-316b-4c6b-baf8-9a0a5b1edddd\",\"name\":\"dddd\",\"avatar\":{\"icon\":\"mdi-account\",\"color\":\"#42a5f5\"},\"position\":0,\"connectId\":null},\"room\":\"abcd\"}"
+}
